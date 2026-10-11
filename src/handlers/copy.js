@@ -50,7 +50,7 @@ async function pickLang(ctx, lang) {
     const { text, meta } = await ai.chat(
       [{ role: 'system', content: SYSTEM },
        { role: 'user', content: `Offer: ${st.offer}\nTone: ${TONES[st.tone]}\nLanguage: ${LANGS[st.lang]}\nAd must drive users to open a Telegram bot. Output 3 numbered variants.` }],
-      { purpose: 'copy', tgId: ctx.from.id, maxTokens: 400 });
+      { purpose: 'copy', tgId: ctx.from.id, maxTokens: 900 });
     st.variants = text;
     const defaultTarget = config.DEFAULT_TARGET_JSON || '{"type":"users","topic_ids":[12,26,7],"language_codes":["en"],"country_codes":["IN","AE"]}';
     const kbRows = [[{ t: '📋 Save all as draft', c: 'copy:to_draft' }], [{ t: '⬅️ Menu', c: 'menu:main' }]];
