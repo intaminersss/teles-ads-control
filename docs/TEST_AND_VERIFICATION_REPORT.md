@@ -47,3 +47,15 @@ TOTAL: 35/35 PASS
 
 ## 5. Regression status
 All v1/v2 capabilities retained; suite extended, nothing removed. Webhook-forbidden spec test still green (SPEC test).
+
+## 6. Deployment verification cycle (v3) — recorded honestly
+| Deploy | Result | Root cause | Fix |
+|---|---|---|---|
+| ebea05e | CRASHED | `log is not a function` — pino migration left 2 old call-shapes (health listen cb, wrap-error) | renamed to logLine/log.error |
+| next | CRASHED | `logLine is not a function` — pollLoop still received pino object | pass logLine |
+| **e48fa138+** | **SUCCESS** | — | clean boot: authorized → scheduler → polling; **public health check from sandbox: `GET https://bot-production-c2eb.up.railway.app/` → {"ok":true,"mode":"polling","uptime":76}`** |
+
+**Process improvement adopted:** local boot-smoke (fake token, 4s run) now precedes every deploy — catches boot-path type errors without touching production. This cycle is exactly why spec §8 mandates log inspection instead of trusting exit codes.
+
+## 7. Final suite state at deploy
+35/35 PASS (30 offline + 5 live). Security scan green post-docs. Webhook-forbidden test green.
