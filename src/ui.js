@@ -74,7 +74,11 @@ const budgetMeter = (remaining, initial) =>
 const kb = rows => ({
   inline_keyboard: (Array.isArray(rows) ? rows : [])
     .filter(r => Array.isArray(r) && r.length)
-    .map(r => r.filter(b => b && (b.t || b.text)).map(b => ({ text: b.t || b.text, callback_data: b.c || b.callback_data, ...b.u })))
+    .map(r => r.filter(b => b && (b.t || b.text)).map(b => {
+      /* keep extra fields (style per Bot API 10.2) + accept t/c shorthand or native keys */
+      const { t, c, u, text, callback_data, ...rest } = b;
+      return { ...rest, text: t || text, callback_data: c || callback_data };
+    }))
     .filter(r => r.length)
 });
 
@@ -86,11 +90,13 @@ function pagerRows(page, pages, base) {
           { t: '▶️', c: `${base}:p${Math.min(pages - 1, page + 1)}` }];
 }
 
+/* Tiered menu — Operate / Automate / System (skill: group by meaning, primary action stands out) */
 const MENU = kb([
-  [{ t: '📊 My Ads', c: 'menu:ads' }, { t: '🔬 Research', c: 'menu:res' }],
-  [{ t: '✍️ Copy Studio', c: 'menu:copy' }, { t: '📋 Drafts', c: 'menu:drafts' }],
-  [{ t: '📈 Reports', c: 'menu:rep' }, { t: '🔔 Alerts', c: 'menu:alr' }],
-  [{ t: '🩺 Health', c: 'menu:health' }, { t: 'ℹ️ About', c: 'menu:about' }]
+  [{ t: '📊  My Ads — live board', c: 'menu:ads', style: 'primary' }],
+  [{ t: '🔬  Research', c: 'menu:res' }, { t: '✍️  Copy Studio', c: 'menu:copy' }],
+  [{ t: '📋  Drafts', c: 'menu:drafts' }, { t: '📈  Reports', c: 'menu:rep' }],
+  [{ t: '🔔  Alerts', c: 'menu:alr' }],
+  [{ t: '🩺 Health', c: 'menu:health' }, { t: 'ℹ️  About', c: 'menu:about' }]
 ]);
 
 function toCsv(rows) {

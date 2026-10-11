@@ -52,9 +52,12 @@ async function adDetail(ctx, id) {
 }
 
 async function adAction(ctx, id, action) {
+  /* _go suffix = confirmed execution of a previously-gated action (router passes raw data) */
+  const isGo = action.endsWith('_go');
+  if (isGo) action = action.slice(0, -3);
   const key = `ad:${id}:${action}`;
   const confirmables = { pause: 'PAUSE', resume: 'RESUME', del: 'DELETE', capup: 'DAILY CAP +1 TON' };
-  if (['pause', 'resume', 'del', 'capup'].includes(action) && !ctx.data.endsWith('_go')) {
+  if (!isGo && ['pause', 'resume', 'del', 'capup'].includes(action)) {
     guard.askConfirm(key, { id, action });
     return ctx.editOrSend(
       `⚠️ <b>Confirm: ${confirmables[action]} ad #${id}?</b>\nThis is a consequential live-platform action.`,

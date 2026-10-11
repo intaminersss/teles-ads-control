@@ -7,7 +7,7 @@ const isAllowed = tgId => config.ALLOWED_USER_IDS.includes(Number(tgId));
 
 /* per-user sliding-window rate limit (default 20 actions / 60s) */
 const hits = new Map();
-function rateLimited(tgId, max = 20, winMs = 60000) {
+function rateLimited(tgId, max = Number(process.env.RATE_LIMIT_MAX || 20), winMs = 60000) {
   const now = Date.now();
   const arr = (hits.get(tgId) || []).filter(t => now - t < winMs);
   arr.push(now);

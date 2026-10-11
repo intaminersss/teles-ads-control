@@ -93,12 +93,13 @@ const sendDoc = (chatId, filename, content, caption) => call('sendDocument', {
 const typing = chatId => call('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
 
 /* sendAnimation — multipart upload (real file path) */
-async function sendAnimation(chatId, filePath, caption) {
+async function sendAnimation(chatId, filePath, caption, kb) {
   const fs = require('fs');
   const buf = fs.readFileSync(filePath);
   const fd = new FormData();
   fd.append('chat_id', String(chatId));
-  if (caption) fd.append('caption', caption);
+  if (caption) fd.append('caption', String(caption).slice(0, 1024)); // official caption limit for media
+  if (kb) fd.append('reply_markup', JSON.stringify(kb));
   fd.append('animation', new Blob([buf], { type: 'image/gif' }), filePath.split('/').pop());
   const res = await fetch(`${API}/sendAnimation`, { method: 'POST', body: fd });
   const j = await res.json().catch(() => ({ ok: false, description: 'bad-json' }));

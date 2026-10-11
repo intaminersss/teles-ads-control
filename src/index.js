@@ -28,7 +28,7 @@ function makeCtx(u) {
     chatId, from,
     sm: (text, kb) => tg.sm(chatId, text, kb),
     sendDoc: (name, content, caption) => tg.sendDoc(chatId, name, content, caption),
-    sendAnimation: (filePath, caption) => tg.sendAnimation(chatId, filePath, caption),
+    sendAnimation: (filePath, caption, kb) => tg.sendAnimation(chatId, filePath, caption, kb),
     answerCb: text => cb ? tg.answerCb(cb.id, text) : Promise.resolve(),
     data: cb?.data || '',
     editOrSend: (text, kb) => cb?.message ? tg.edit(chatId, cb.message.message_id, text, kb) : tg.sm(chatId, text, kb),
@@ -86,18 +86,40 @@ async function routeCb(ctx) {
   return ctx.answerCb();
 }
 
+const path = require('path');
+const HERO = path.join(__dirname, '../assets/hero.gif');
+
 async function mainMenu(ctx) {
   const name = ctx.from?.first_name || 'Boss';
-  const text = [
-    fmt.BRAND.line,
-    `  <b>▲ THETAS AI</b> — Ads Intelligence Desk`,
-    `  <i>${fmt.BRAND.credit}</i>`,
-    fmt.BRAND.line,
-    `👋 ${fmt.esc(name)} — official Telegram Ads platform + research + AI.`,
-    `<i>Pick a module below. Sensitive actions always ask first.</i>`
+  /* Returning via ⬅️ Menu button → fast edit-in-place (no re-sending media) */
+  if (ctx.data === 'menu:main' && ctx.chatId) {
+    const text = [
+      `${fmt.header('⚙️', 'CONTROL DESK')}`,
+      `Welcome back, <b>${fmt.esc(name)}</b>. Pick a module — sensitive actions always confirm first.`,
+      ``,
+      `<i>${fmt.BRAND.credit}</i>`
+    ].join('\n');
+    return ctx.editOrSend(text, MENU);
+  }
+  /* Fresh /start → cinematic hero: branded animation + caption + tiered keyboard */
+  const caption = [
+    `👋 <b>Welcome, ${fmt.esc(name)}!</b>`,
+    `Your advertising desk: <b>live ads</b>, <b>channel research</b>, <b>AI copy</b> — official Telegram Ads platform.`,
+    ``,
+    `<i>${fmt.BRAND.credit}</i>`
   ].join('\n');
-  if (ctx.data === 'menu:main' && ctx.chatId) await ctx.editOrSend(text, MENU);
-  else await ctx.sm(text, MENU);
+  try {
+    return await ctx.sendAnimation(HERO, caption, MENU);
+  } catch (e) {
+    log.warn(`hero send failed (${e.message}) — text fallback`);
+    const text = [
+      `${fmt.header('⚙️', 'CONTROL DESK')}`,
+      `Welcome, <b>${fmt.esc(name)}</b> — pick a module.`,
+      ``,
+      `<i>${fmt.BRAND.credit}</i>`
+    ].join('\n');
+    return ctx.sm(text, MENU);
+  }
 }
 
 function wrap(ctx, fn) {
@@ -144,15 +166,21 @@ async function onUpdate(u) {
 }
 
 /* ---- health HTTP server (Railway platform check; harmless for a polling worker) ---- */
-http.createServer((req, res) => {
+const healthHandler = (req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true, product: 'THETAS AI', built_by: '@TelesAds (Telesads.com)', mode: config.BOT_MODE, uptime: process.uptime(), lastUpdateAt: tg.stats().lastUpdateAt }));
-}).listen(config.PORT, () => logLine(`health server on :${config.PORT}`));
+};
+const healthSrv = http.createServer(healthHandler);
+healthSrv.on('error', e => logLine(`health server skipped: ${e.code || e.message}`));
+healthSrv.listen(config.PORT, () => logLine(`health server on :${config.PORT}`));
+healthSrv.unref(); // never hold the process/event loop open (tests exit clean)
 
-/* ---- boot ---- */
+/* ---- boot (only when run directly; require() exports router for tests) ---- */
 process.telesStopped = stoppedGenerations; // runtime registry shared with copy handler
 
-(async () => {
+module.exports = { onUpdate, makeCtx, routeCb, mainMenu, stoppedGenerations };
+
+if (require.main === module) (async () => {
   log.info('THETAS AI booting…');
   const me = await tg.getMe();
   await tg.call('setMyCommands', { commands: [
