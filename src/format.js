@@ -1,7 +1,8 @@
 'use strict';
 /* format.js — v2 compatibility shim → design system lives in ui.js now */
 const ui = require('./ui');
-const { esc, money, toCsv, kb, MENU } = ui;
+const { esc, toCsv, kb, MENU } = ui;
+const money = ui.inr; // v1 name → v2 inr() (TON→INR estimate)
 
 const STATUS_EMO = { active: '🟢', on_hold: '⏸️', in_review: '🟡', declined: '❌', paused: '⏸️' };
 const statusLabel = s => `${STATUS_EMO[s] || '⚪'} ${esc(s || 'unknown')}`;

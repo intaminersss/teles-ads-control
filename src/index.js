@@ -56,10 +56,11 @@ async function routeCb(ctx) {
   const d = ctx.data;
   if (ctx.data && ctx.data !== 'noop') ctx.answerCb().catch(() => {}); // every tap acknowledged
   if (d.startsWith('menu:')) return routeMenu(ctx, d.slice(5));
+  if (d.startsWith('ads:p')) return wrap(ctx, () => ads.adsMenu(ctx, Number(d.slice(5)) || 0));
   if (d.startsWith('ads:refresh')) return wrap(ctx, () => ads.adsMenu(ctx));
   if (d.startsWith('ad:')) { const [, id, act] = d.split(':'); return act ? wrap(ctx, () => ads.adAction(ctx, Number(id), act)) : wrap(ctx, () => ads.adDetail(ctx, Number(id))); }
   if (d.startsWith('res:q:')) return wrap(ctx, () => research.runSearch(ctx, d.slice(6)));
-  if (d.startsWith('res:page:')) { const [, , q, p] = d.split(':'); return wrap(ctx, () => research.searchPage(ctx, q, Number(p))); }
+  if (d.startsWith('res:page:')) { const [, , q, p] = d.split(':'); return wrap(ctx, () => research.searchPage(ctx, q, Math.max(0, Number(p) || 0))); }
   if (d.startsWith('res:chk:')) return wrap(ctx, () => research.checkChannel(ctx, d.slice(8)));
   if (d.startsWith('res:save:')) return research.saveChannel(ctx, d.slice(9));
   if (d === 'res:lists') return wrap(ctx, () => research.lists(ctx));

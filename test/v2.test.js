@@ -22,7 +22,7 @@ test('ui: bar() reflects REAL fractions and clamps', () => {
 
 test('ui: header/pill/spin consistent design tokens', () => {
   const { header, pill, spin } = require('../src/ui');
-  assert.ok(header('📊', 'X').includes('TELES ADS'));
+  assert.ok(header('📊', 'X').includes('THETAS AI'));
   assert.strictEqual(pill('active'), '🟢 ACTIVE');
   assert.ok(['◜', '◠', '◝', '◞', '◡', '◟'].includes(spin(0)));
 });

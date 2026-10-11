@@ -69,7 +69,11 @@ async function renderResults(ctx, page) {
     fmt.kb(kbRows));
 }
 
-async function searchPage(ctx, query, page) { return runSearch(ctx, query, page); }
+async function searchPage(ctx, query, page) {
+  const st = searchState.get(ctx.chatId);
+  if (st && st.query === query) return renderResults(ctx, page);
+  return runSearch(ctx, query, 0);
+}
 
 async function researchFail(ctx, e) {
   return ctx.editOrSend(`❌ Research failed: <i>${fmt.esc(e.message)}</i>`, fmt.kb([[{ t: '⬅️ Research', c: 'menu:res' }]]));

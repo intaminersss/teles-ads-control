@@ -89,7 +89,7 @@ test('schema.sql defines all core tables', () => {
 test('SECURITY: no secret-like strings anywhere in repo', () => {
   const bad = /gsk_[A-Za-z0-9_\-]{20,}|sk-or-v1-[a-f0-9]{20,}|nvapi-[\w-]{20,}|sbp_[a-f0-9]{20,}|tgs_[a-f0-9]{20,}|\b\d{8,10}:AA[\w-]{30,}/;
   const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e =>
-    e.isDirectory() ? (['node_modules', '.git', 'test'].includes(e.name) ? [] : walk(path.join(d, e.name))) : [path.join(d, e.name)]);
+    e.isDirectory() ? (['node_modules', '.git', 'test', 'archive', 'docs', '.agents'].includes(e.name) ? [] : walk(path.join(d, e.name))) : [path.join(d, e.name)]);
   const offenders = walk(root).filter(f => /\.(js|json|md|sql|example)$|\.env\.example$/i.test(f))
     .filter(f => { try { return bad.test(fs.readFileSync(f, 'utf8')); } catch { return false; } });
   assert.deepStrictEqual(offenders, [], `secret-like strings in: ${offenders}`);

@@ -71,7 +71,12 @@ const budgetMeter = (remaining, initial) =>
   `💼 <code>${bar(remaining, Math.max(remaining, initial || 0))}</code> ${ton(remaining)} free`;
 
 /* Keyboard builder (t/c shorthand → Telegram shape) */
-const kb = rows => ({ inline_keyboard: rows.map(r => r.map(b => ({ text: b.t, callback_data: b.c, ...b.u }))) });
+const kb = rows => ({
+  inline_keyboard: (Array.isArray(rows) ? rows : [])
+    .filter(r => Array.isArray(r) && r.length)
+    .map(r => r.filter(b => b && (b.t || b.text)).map(b => ({ text: b.t || b.text, callback_data: b.c || b.callback_data, ...b.u })))
+    .filter(r => r.length)
+});
 
 /* Pager rows: prev/next with honest page indicator */
 function pagerRows(page, pages, base) {
