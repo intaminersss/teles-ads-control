@@ -26,3 +26,8 @@ Thetas Ai/
 - Deploy: push to main (verified auto-deploy) · Rollback: Railway → Deployments → Redeploy
 - Tests: node --test test/unit.test.js test/v2.test.js test/failure.test.js
 - Secrets: Railway env (19 vars) + archive/pips_secrets_local.txt (never commit)
+
+## Deploy (v4+)
+- **Railway CLI works WITHOUT GitHub push:** `RAILWAY_API_TOKEN=<account token> npx @railway/cli up --detach` (project already linked via .railway). Note: env var must be `RAILWAY_API_TOKEN` (account token), NOT `RAILWAY_TOKEN`.
+- v4 shipped this way (deployment b24316de, SUCCESS, health verified).
+- GitHub push PENDING: PAT ghp_hhCX… revoked (401); ghp_u5zq… (noontrade69-sketch) has read-only. Need fresh PAT (repo scope, intaminersss) to sync main (v4 commit 4ba08e8 is local).
