@@ -59,3 +59,9 @@ All v1/v2 capabilities retained; suite extended, nothing removed. Webhook-forbid
 
 ## 7. Final suite state at deploy
 35/35 PASS (30 offline + 5 live). Security scan green post-docs. Webhook-forbidden test green.
+
+## 8. Rebrand cycle (THETAS AI) — production-surfaced bugs & fixes
+Owner's real taps on the live bot surfaced 2 handler errors (found in Railway logs — the monitoring loop works):
+1. `fmt.money is not a function` (reports) — v2 shim destructured non-existent export → aliased to ui.inr.
+2. `r.map is not a function` (ui.js kb) — malformed keyboard rows crashed screen → kb() hardened (filters invalid rows); PLUS missing `ads:pN` pager route (taps fell through to adDetail(NaN)) → routed; `res:page` NaN clamped; searchPage state-safe.
+All fixed, 35/35 tests green, deployed SUCCESS, public health verified. Tests updated to be rebrand-aware (THETAS AI) and archive-excluded (secrets-scan walks product code only; archive never enters git).
