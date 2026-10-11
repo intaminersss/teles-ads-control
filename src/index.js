@@ -163,5 +163,5 @@ process.telesStopped = stoppedGenerations; // runtime registry shared with copy 
   log.info(`authorized as @${me.username}`);
   if (config.BOT_MODE !== 'polling') log.warn('BOT_MODE != polling — spec forbids webhook; forcing polling.');
   scheduler.start(logLine);
-  await tg.pollLoop(onUpdate, log);
+  await tg.pollLoop(onUpdate, logLine);
 })().catch(e => { log.error(`FATAL boot: ${e.stack || e.message}`); process.exit(1); });
