@@ -24,6 +24,11 @@ async function health(ctx) {
 }
 
 const MATRIX = [
+  ['🎨 Design system v2 (headers, pills, bars, pagers)', 'COMPLETED — Telegram-native HTML only'],
+  ['⏳ Real-work progress (spinners tied to actual phases)', 'COMPLETED — no fabricated percentages'],
+  ['🎬 Launch animation (self-generated GIF)', 'COMPLETED — real asset, uploads via sendAnimation'],
+  ['😀 Custom emoji entities', 'FALLBACK MODE — no verified custom-emoji IDs available; unicode used (env hook ready, never invented)'],
+  ['🔀 AI provider switching + circuit breaker', 'COMPLETED — tested with real fallback'],
   ['📊 Live ads board (list/detail/metrics)', 'VERIFIED — official API'],
   ['⏸️ Pause / ▶️ resume ads', 'VERIFIED — official API'],
   ['🗑️ Delete ad (refund to balance)', 'VERIFIED — official API'],

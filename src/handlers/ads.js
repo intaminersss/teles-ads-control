@@ -2,16 +2,32 @@
 /* handlers/ads.js — live ad board, per-ad detail, guarded actions (pause/resume/delete/edit cap). */
 const adsapi = require('../adsapi');
 const fmt = require('../format');
+const tg = require('../tg');
+const path = require('path');
+const { BRAND } = fmt;
 const guard = require('../guard');
 
-async function adsMenu(ctx) {
+const boardState = new Map(); // chatId -> {ads, page}
+const PAGE = 4;
+
+async function adsMenu(ctx, page = 0) {
   const acct = await adsapi.getCurrentAccount();
   const ads = await adsapi.getAdsList();
-  const bal = acct?.remaining_budget != null ? `💰 Balance: <b>${acct.remaining_budget} TON</b>\n\n` : '';
-  const kbRows = [[{ t: '🔄 Refresh', c: 'ads:refresh' }]];
-  for (const a of ads.slice(0, 8)) kbRows.push([{ t: `#${a.ad_id} ${fmt.statusLabel(a.status)}`, c: `ad:${a.ad_id}` }]);
-  kbRows.push([{ t: '⬅️ Menu', c: 'menu:main' }]);
-  await ctx.editOrSend(`${bal}📊 <b>LIVE ADS BOARD</b>\n${fmt.adsBoard(ads)}`, fmt.kb(kbRows));
+  boardState.set(ctx.chatId, { ads, page });
+  const pages = Math.max(1, Math.ceil(ads.length / PAGE));
+  page = Math.min(page, pages - 1);
+  const slice = ads.slice(page * PAGE, page * PAGE + PAGE);
+  const bal = acct?.remaining_budget != null
+    ? `${fmt.header('📊', 'LIVE ADS')}
+💰 <code>${fmt.bar(acct.remaining_budget, Math.max(acct.remaining_budget, 20))}</code> balance <b>${fmt.ton(acct.remaining_budget)}</b>
+
+` : '';
+  const kbRows = slice.map(a => [{ t: `#${a.ad_id} ${fmt.pill(a.status)}`, c: `ad:${a.ad_id}` }]);
+  kbRows.push(...fmt.pagerRows(page, pages, 'ads'));
+  kbRows.push([{ t: '🔄 Refresh', c: 'ads:refresh' }, { t: '⬅️ Menu', c: 'menu:main' }]);
+  const body = [`${bal}${fmt.adsBoard(slice)}`];
+  if (pages > 1) body.push(`<i>page ${page + 1}/${pages} — ${ads.length} ads total</i>`);
+  await ctx.editOrSend(body.join('\n'), fmt.kb(kbRows));
 }
 
 async function adDetail(ctx, id) {
@@ -60,7 +76,11 @@ async function adAction(ctx, id, action) {
     }
     await guard.audit(ctx.from.id, `ad.${action}`, { id }, result);
     await ctx.answerCb(`${action} ✓`);
-    if (action === 'del' && result === 'ok') return ctx.editOrSend(`🗑️ #${id} deleted. Refund lands in balance automatically.`, fmt.kb([[{ t: '⬅️ Ads', c: 'menu:ads' }]]));
+    if (action === 'del' && result === 'ok') {
+      ctx.sm('🧹 Cleanup done.').catch(() => {});
+      return ctx.editOrSend(`${fmt.header('🗑️', 'AD DELETED')}
+#${id} removed. <i>Refund lands in balance automatically.</i>`, fmt.kb([[{ t: '📊 My Ads', c: 'menu:ads' }]]));
+    }
     return adDetail(ctx, id);
   } catch (e) {
     await guard.audit(ctx.from.id, `ad.${action}`, { id }, `ERROR ${e.code || e.message}`);

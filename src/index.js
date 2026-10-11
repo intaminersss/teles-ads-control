@@ -27,6 +27,7 @@ function makeCtx(u) {
     chatId, from,
     sm: (text, kb) => tg.sm(chatId, text, kb),
     sendDoc: (name, content, caption) => tg.sendDoc(chatId, name, content, caption),
+    sendAnimation: (filePath, caption) => tg.sendAnimation(chatId, filePath, caption),
     answerCb: text => cb ? tg.answerCb(cb.id, text) : Promise.resolve(),
     data: cb?.data || '',
     editOrSend: (text, kb) => cb?.message ? tg.edit(chatId, cb.message.message_id, text, kb) : tg.sm(chatId, text, kb),
@@ -56,6 +57,7 @@ async function routeCb(ctx) {
   if (d.startsWith('ads:refresh')) return wrap(ctx, () => ads.adsMenu(ctx));
   if (d.startsWith('ad:')) { const [, id, act] = d.split(':'); return act ? wrap(ctx, () => ads.adAction(ctx, Number(id), act)) : wrap(ctx, () => ads.adDetail(ctx, Number(id))); }
   if (d.startsWith('res:q:')) return wrap(ctx, () => research.runSearch(ctx, d.slice(6)));
+  if (d.startsWith('res:page:')) { const [, , q, p] = d.split(':'); return wrap(ctx, () => research.searchPage(ctx, q, Number(p))); }
   if (d.startsWith('res:chk:')) return wrap(ctx, () => research.checkChannel(ctx, d.slice(8)));
   if (d.startsWith('res:save:')) return research.saveChannel(ctx, d.slice(9));
   if (d === 'res:lists') return wrap(ctx, () => research.lists(ctx));
@@ -82,7 +84,14 @@ async function routeCb(ctx) {
 
 async function mainMenu(ctx) {
   const name = ctx.from?.first_name || 'Boss';
-  const text = `👑 <b>TELES ADS CONTROL</b>\nTelegram-native advertising assistant — official Telegram Ads platform + research + AI.\n\nWelcome, ${fmt.esc(name)}`;
+  const text = [
+    fmt.BRAND.line,
+    `  <b>TELES ADS CONTROL</b>  v2`,
+    `  <i>Telegram-native advertising desk</i>`,
+    fmt.BRAND.line,
+    `👋 ${fmt.esc(name)} — official Ads platform + research + AI.`,
+    `<i>Pick a module below. Sensitive actions always ask first.</i>`
+  ].join('\n');
   if (ctx.data === 'menu:main' && ctx.chatId) await ctx.editOrSend(text, MENU);
   else await ctx.sm(text, MENU);
 }

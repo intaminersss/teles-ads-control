@@ -38,6 +38,21 @@ const sendDoc = (chatId, filename, content, caption) => call('sendDocument', {
 });
 const getMe = () => call('getMe');
 
+
+/* sendAnimation — multipart file upload (file path inside project, e.g. assets/launch.gif) */
+async function sendAnimation(chatId, filePath, caption) {
+  const fs = require('fs');
+  const buf = fs.readFileSync(filePath);
+  const fd = new FormData();
+  fd.append('chat_id', String(chatId));
+  if (caption) fd.append('caption', caption);
+  fd.append('animation', new Blob([buf], { type: 'image/gif' }), filePath.split('/').pop());
+  const res = await fetch(`${API}/sendAnimation`, { method: 'POST', body: fd });
+  const j = await res.json().catch(() => ({ ok: false, description: 'bad-json' }));
+  if (!j.ok) throw new Error(redact(j.description || `HTTP ${res.status}`));
+  return j.result;
+}
+
 /** Long-poll loop. onUpdate(upd) should never throw. */
 async function pollLoop(onUpdate, log) {
   const me = await getMe();
@@ -61,4 +76,4 @@ async function pollLoop(onUpdate, log) {
   }
 }
 
-module.exports = { call, sm, edit, answerCb, sendDoc, getMe, pollLoop, stats: () => ({ lastUpdateAt }) };
+module.exports = { call, sm, edit, answerCb, sendDoc, sendAnimation, getMe, pollLoop, stats: () => ({ lastUpdateAt }) };

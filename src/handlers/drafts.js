@@ -4,6 +4,7 @@ const db = require('../db');
 const adsapi = require('../adsapi');
 const fmt = require('../format');
 const guard = require('../guard');
+const path = require('path');
 
 async function draftsMenu(ctx) {
   const rows = await db.q(`select id,title,status,initial_budget,launched_ad_id from drafts where status in ('draft','failed') order by updated_at desc limit 8`);
@@ -52,7 +53,10 @@ async function launchFlow(ctx, id, confirmed) {
     const adId = r.ad_id ?? r?.ad?.ad_id ?? null;
     await db.q(`update drafts set status='launched', launched_ad_id=$2, last_error=null, updated_at=now() where id=$1`, [id, adId]);
     await guard.audit(ctx.from.id, 'draft.launch', { id, adId }, 'ok');
-    await ctx.edit(msg.chat.id, msg.message_id, `✅ <b>AD CREATED: #${adId}</b> — status: ${fmt.esc(r.status || 'in_review')}`, fmt.kb([[{ t: '📊 View in My Ads', c: `ad:${adId}` }]]));
+    await ctx.edit(msg.chat.id, msg.message_id, `${fmt.header('🚀', 'AD CREATED')}
+${fmt.pill(r.status || 'in_review')} <b>#${adId}</b>
+<i>In platform review now — track it in My Ads.</i>`, fmt.kb([[{ t: `📊 Open ad #${adId}`, c: `ad:${adId}` }]]));
+    try { await ctx.sendAnimation(path.join(__dirname, '../../assets/launch.gif')); } catch { /* animation is decorative */ }
   } catch (e) {
     await db.q(`update drafts set status='failed', last_error=$2, updated_at=now() where id=$1`, [id, String(e.code || e.message).slice(0, 300)]);
     await guard.audit(ctx.from.id, 'draft.launch', { id }, `ERROR ${e.code || e.message}`);

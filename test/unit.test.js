@@ -30,7 +30,9 @@ test('format: adsBoard computes join-rate', () => {
     { ad_id: 79, status: 'active', views: 10, clicks: 2, joins: 1, spent_budget: 0.1 },
     { ad_id: 65, status: 'on_hold', views: 5, clicks: 0, joins: 0, spent_budget: 0 }
   ]);
-  assert.ok(board.includes('#79') && board.includes('JR 50.0%'), board);
+  const plain = board.replace(/<[^>]+>/g, '');
+  assert.ok(board.includes('#79'), 'ad id row');
+  assert.ok(plain.includes('JR 50.0%'), 'join-rate computed: ' + plain.slice(0, 200));
   assert.ok(board.includes('Σ'), 'totals row');
 });
 

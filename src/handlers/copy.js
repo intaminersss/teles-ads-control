@@ -45,18 +45,25 @@ async function pickTone(ctx, tone) {
 async function pickLang(ctx, lang) {
   const st = state.get(ctx.chatId); if (!st?.offer) return;
   st.lang = lang;
-  const msg = await ctx.sm('✍️ Generating 3 variants…');
+  const msg = await ctx.sm(`${fmt.header('✍️', 'COPY STUDIO')}
+${fmt.spin(0)} starting AI chain…`);
+  let phaseI = 0;
+  const onAttempt = (p, n, total) => {
+    phaseI++;
+    ctx.edit(msg.chat.id, msg.message_id, `${fmt.header('✍️', 'COPY STUDIO')}
+${fmt.spin(phaseI)} drafting via <b>${fmt.esc(p)}</b> <i>(engine ${n}/${total})</i>…`).catch(() => {});
+  };
   try {
     const { text, meta } = await ai.chat(
       [{ role: 'system', content: SYSTEM },
        { role: 'user', content: `Offer: ${st.offer}\nTone: ${TONES[st.tone]}\nLanguage: ${LANGS[st.lang]}\nAd must drive users to open a Telegram bot. Output 3 numbered variants.` }],
-      { purpose: 'copy', tgId: ctx.from.id, maxTokens: 900 });
+      { purpose: 'copy', tgId: ctx.from.id, maxTokens: 900, onAttempt });
     st.variants = text;
     const defaultTarget = config.DEFAULT_TARGET_JSON || '{"type":"users","topic_ids":[12,26,7],"language_codes":["en"],"country_codes":["IN","AE"]}';
     const kbRows = [[{ t: '📋 Save all as draft', c: 'copy:to_draft' }], [{ t: '⬅️ Menu', c: 'menu:main' }]];
     st.target = JSON.parse(defaultTarget);
     await ctx.edit(msg.chat.id, msg.message_id,
-      `✅ <b>3 VARIANTS</b> <i>(AI recommendation — NOT a performance guarantee; est. $${meta.est_cost_usd}, ${meta.provider}/${meta.model})</i>\n\n${fmt.esc(text)}`,
+      `${fmt.header('✅', '3 VARIANTS READY')}${meta.skipped_providers?.length ? `\n⚠️ circuit-skipped: ${fmt.esc(meta.skipped_providers.join(', '))}` : ''}\n${fmt.esc(text)}\n\n${fmt.BRAND.lineThin}\n<i>AI recommendation — NOT a performance guarantee · ${meta.provider}/${meta.model} · ${meta.attempts} attempt(s) · est. $${meta.est_cost_usd}</i>`,
       fmt.kb(kbRows));
     state.set(ctx.chatId, st);
   } catch (e) {

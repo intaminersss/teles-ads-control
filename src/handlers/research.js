@@ -16,33 +16,63 @@ async function researchMenu(ctx) {
     ]));
 }
 
-async function runSearch(ctx, query) {
-  const st = await ctx.editOrSend(`🔎 Searching tgadsspy for “<b>${fmt.esc(query)}</b>”…`);
-  try {
-    const { rows, source } = await spyapi.searchChannels({ q: query, limit: 8 });
-    if (!rows.length) {
-      return ctx.editOrSend(`📭 No channels found for “${fmt.esc(query)}”. Try a broader keyword.`,
-        fmt.kb([[{ t: '⬅️ Research', c: 'menu:res' }]]));
-    }
-    for (const r of rows) {
-      await db.q(`insert into channels(username,title,members,niche,geo,lang,raw,updated_at)
-                  values ($1,$2,$3,$4,$5,$6,$7,now())
-                  on conflict (username) do update set title=$2, members=$3, niche=$4, updated_at=now()`,
-        [r.username, r.title, r.members, r.niche, r.geo, r.lang, JSON.stringify(r)]);
-    }
-    const kbRows = rows.map((r, i) => [{
-      t: `${i + 1}. ${(r.title || r.username).slice(0, 22)}`,
-      c: `res:chk:${r.username}`
-    }]);
-    kbRows.push([{ t: '⬅️ Research', c: 'menu:res' }]);
-    return ctx.editOrSend(
-      `🔬 <b>RESULTS — “${fmt.esc(query)}”</b> <i>(source: ${source}, ${new Date().toISOString().slice(0, 16)} UTC)</i>\n\n` +
-      rows.map((r, i) => fmt.channelCard(r, i)).join('\n\n') +
-      '\n\nTap a channel to validate it for Telegram Ads placements.',
-      fmt.kb(kbRows));
-  } catch (e) {
-    return ctx.editOrSend(`❌ Research failed: <i>${fmt.esc(e.message)}</i>`, fmt.kb([[{ t: '⬅️ Research', c: 'menu:res' }]]));
+const RESEARCH_PAGE = 6;
+const searchState = new Map(); // chatId -> {query, rows, page}
+
+async function runSearch(ctx, query, page = 0) {
+  if (searchState.has(ctx.chatId) && searchState.get(ctx.chatId).query === query && page > 0) {
+    return renderResults(ctx, page);
   }
+  const t0 = Date.now();
+  let st = await ctx.editOrSend(`${fmt.header('🔬', 'RESEARCH')}
+${fmt.spin(0)} connecting to tgadsspy archive…`);
+  let spinI = 0;
+  const tick = setInterval(() => { spinI++; ctx.edit(st.chat.id, st.message_id, `${fmt.header('🔬', 'RESEARCH')}
+${fmt.spin(spinI)} scanning advertisers for “<b>${fmt.esc(query)}</b>”…`).catch(() => {}); }, 1200);
+  let rows, source;
+  try {
+    const r = await spyapi.searchChannels({ q: query, limit: 24 });
+    rows = r.rows; source = r.source;
+  } finally { clearInterval(tick); }
+  if (!rows.length) {
+    return ctx.editOrSend(`📭 No channels found for “${fmt.esc(query)}”. Try a broader keyword.`,
+      fmt.kb([[{ t: '⬅️ Research', c: 'menu:res' }]]));
+  }
+  for (const r of rows) {
+    await db.q(`insert into channels(username,title,members,niche,geo,lang,raw,updated_at)
+                values ($1,$2,$3,$4,$5,$6,$7,now())
+                on conflict (username) do update set title=$2, members=$3, niche=$4, updated_at=now()`,
+      [r.username, r.title, r.members, r.niche, r.geo, r.lang, JSON.stringify(r)]);
+  }
+  searchState.set(ctx.chatId, { query, rows, page: 0 });
+  const ms = Date.now() - t0;
+  st = await ctx.editOrSend(`${fmt.header('🔬', 'RESULTS')}
+✅ <b>${rows.length}</b> advertiser-active accounts in <code>${ms}ms</code>
+<i>${fmt.esc(source)}</i>`);
+  return renderResults(ctx, 0);
+}
+
+async function renderResults(ctx, page) {
+  const { query, rows } = searchState.get(ctx.chatId) || {};
+  if (!rows) return ctx.answerCb('Run a search first');
+  const pages = Math.ceil(rows.length / RESEARCH_PAGE);
+  page = Math.min(page, pages - 1);
+  const slice = rows.slice(page * RESEARCH_PAGE, page * RESEARCH_PAGE + RESEARCH_PAGE);
+  const kbRows = slice.map((r, i) => [{ t: `${page * RESEARCH_PAGE + i + 1}. ${(r.title || r.username).slice(0, 24)}`, c: `res:chk:${r.username}` }]);
+  kbRows.push(...fmt.pagerRows(page, pages, `res:page:${query}`));
+  kbRows.push([{ t: '⬅️ Research', c: 'menu:res' }]);
+  return ctx.editOrSend(
+    `${fmt.header('🔬', `“${query}”`)}
+` +
+    slice.map((r, i) => fmt.channelCard(r, page * RESEARCH_PAGE + i)).join('\n\n') +
+    `\n\n<i>Observed ad activity — not audience guarantees. Tap to validate for Ads placements.</i>`,
+    fmt.kb(kbRows));
+}
+
+async function searchPage(ctx, query, page) { return runSearch(ctx, query, page); }
+
+async function researchFail(ctx, e) {
+  return ctx.editOrSend(`❌ Research failed: <i>${fmt.esc(e.message)}</i>`, fmt.kb([[{ t: '⬅️ Research', c: 'menu:res' }]]));
 }
 
 async function checkChannel(ctx, username) {
@@ -88,4 +118,4 @@ async function exportCsv(ctx, listId) {
   await ctx.sendDoc(`teles-research-${l?.name || listId}.csv`, csv, `📄 ${rows.length} channels — source: tgadsspy + Telegram Ads validation (${new Date().toISOString().slice(0, 10)})`);
 }
 
-module.exports = { researchMenu, runSearch, checkChannel, saveChannel, lists, exportCsv };
+module.exports = { researchMenu, runSearch, searchPage, researchFail, checkChannel, saveChannel, lists, exportCsv };
