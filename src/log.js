@@ -5,7 +5,7 @@ const pino = require('pino');
 const { redact } = require('./config');
 
 const base = {
-  svc: 'teles-ads-control',
+  svc: 'thetas-ai',
   ver: require('../package.json').version
 };
 

@@ -1,5 +1,5 @@
 'use strict';
-/* handlers/copy.js v3 — AI Copy Studio.
+/* handlers/copy.js v3 — AI Copy Studio (THETAS AI).
    STREAMING UX via official sendMessageDraft (Bot API 10.3, verified contract):
    - stable draft_id → Telegram animates diffs; empty text = "Thinking…"
    - can_stop=true → user gets Stop button → stopped_message_generation → AbortController

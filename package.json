@@ -1,8 +1,8 @@
 {
-  "name": "teles-ads-control",
+  "name": "thetas-ai",
   "version": "1.0.0",
   "private": true,
-  "description": "TELES Telegram Ads — Telegram-native advertising assistant (official API + research + AI)",
+  "description": "THETAS AI \u2014 Telegram-native advertising assistant. Fully Built By Agency @TelesAds (Telesads.com). Official Telegram Ads API + research + AI.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

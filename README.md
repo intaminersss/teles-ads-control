@@ -1,4 +1,4 @@
-# TELES ADS CONTROL v3
+# THETAS AI (Fully Built By Agency @TelesAds — Telesads.com) v3
 
 Telegram-native advertising assistant for the **official Telegram Ads platform**.
 Built per the Autonomous Product Engineering Master Prompt (source requirements: `uploads/teles_telegram_ads_master_prompt (1).txt`).

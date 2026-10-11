@@ -44,7 +44,7 @@ const MATRIX = [
 
 async function about(ctx) {
   await ctx.editOrSend([
-    'ℹ️ <b>TELES ADS CONTROL</b> — Telegram-native advertising assistant',
+    'ℹ️ <b>▲ THETAS AI</b> — Telegram-native advertising assistant\n<b>Fully Built By Agency @TelesAds</b> · Telesads.com',
     '',
     '<b>CAPABILITY MATRIX</b>',
     ...MATRIX.map(([f, s]) => `• ${f} — <b>${fmt.esc(s)}</b>`),

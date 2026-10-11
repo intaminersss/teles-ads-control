@@ -1,11 +1,13 @@
 'use strict';
-/* ui.js — TELES design system v2 (premium Telegram-native identity).
+/* ui.js — THETAS AI design system (premium Telegram-native identity).
+   Product: THETAS AI — Fully Built By Agency @TelesAds (Telesads.com)
    Philosophy adopted from telegram-bot-ui skill: the whole surface = text + keyboards + transitions + working-state feedback.
    Every visual is plain HTML that Telegram actually renders — no CSS illusions. */
 
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-const BRAND = { title: 'TELES ADS', mark: '▮', line: '━━━━━━━━━━━━━━━━━━━━', lineThin: '─────────────' };
+const BRAND = { title: 'THETAS AI', mark: '▲', line: '━━━━━━━━━━━━━━━━━━━━', lineThin: '─────────────',
+  credit: 'Fully Built By Agency @TelesAds · Telesads.com' };
 
 /* Section header: brand bar + title */
 const header = (icon, title) => `${BRAND.mark} <b>${BRAND.title}</b> ▸ ${icon} <b>${esc(title)}</b>\n${BRAND.line}`;

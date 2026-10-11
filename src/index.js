@@ -1,5 +1,5 @@
 'use strict';
-/* TELES ADS CONTROL — entrypoint: polling loop, router, health server. */
+/* THETAS AI — entrypoint: polling loop, router, health server. */
 const http = require('http');
 const { config, redact } = require('./config');
 const tg = require('./tg');
@@ -89,10 +89,10 @@ async function mainMenu(ctx) {
   const name = ctx.from?.first_name || 'Boss';
   const text = [
     fmt.BRAND.line,
-    `  <b>TELES ADS CONTROL</b>  v2`,
-    `  <i>Telegram-native advertising desk</i>`,
+    `  <b>▲ THETAS AI</b> — Ads Intelligence Desk`,
+    `  <i>${fmt.BRAND.credit}</i>`,
     fmt.BRAND.line,
-    `👋 ${fmt.esc(name)} — official Ads platform + research + AI.`,
+    `👋 ${fmt.esc(name)} — official Telegram Ads platform + research + AI.`,
     `<i>Pick a module below. Sensitive actions always ask first.</i>`
   ].join('\n');
   if (ctx.data === 'menu:main' && ctx.chatId) await ctx.editOrSend(text, MENU);
@@ -145,14 +145,14 @@ async function onUpdate(u) {
 /* ---- health HTTP server (Railway platform check; harmless for a polling worker) ---- */
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ ok: true, mode: config.BOT_MODE, uptime: process.uptime(), lastUpdateAt: tg.stats().lastUpdateAt }));
+  res.end(JSON.stringify({ ok: true, product: 'THETAS AI', built_by: '@TelesAds (Telesads.com)', mode: config.BOT_MODE, uptime: process.uptime(), lastUpdateAt: tg.stats().lastUpdateAt }));
 }).listen(config.PORT, () => logLine(`health server on :${config.PORT}`));
 
 /* ---- boot ---- */
 process.telesStopped = stoppedGenerations; // runtime registry shared with copy handler
 
 (async () => {
-  log.info('TELES ADS CONTROL booting…');
+  log.info('THETAS AI booting…');
   const me = await tg.getMe();
   await tg.call('setMyCommands', { commands: [
     { command: 'start', description: 'Open the control desk' },
