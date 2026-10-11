@@ -101,7 +101,7 @@ async function mainMenu(ctx) {
 
 function wrap(ctx, fn) {
   return fn().catch(async e => {
-    log(`wrap error: ${redact(e.stack || e.message)}`);
+    log.error(`wrap error: ${e.stack || e.message}`);
     try { await ctx.editOrSend(`❌ <i>${redact(e.message).slice(0, 200)}</i>`, MENU); } catch {}
   });
 }
