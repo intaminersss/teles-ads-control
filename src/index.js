@@ -13,6 +13,8 @@ const copy = require('./handlers/copy');
 const drafts = require('./handlers/drafts');
 const reports = require('./handlers/reports');
 const alerts = require('./handlers/alerts');
+const packages = require('./handlers/packages');
+const testad = require('./handlers/testad');
 const admin = require('./handlers/admin');
 const scheduler = require('./scheduler');
 
@@ -43,6 +45,8 @@ async function routeMenu(ctx, sub) {
     case 'main': case undefined: return mainMenu(ctx);
     case 'ads': return wrap(ctx, () => ads.adsMenu(ctx));
     case 'res': return wrap(ctx, () => research.researchMenu(ctx));
+    case 'pkg': return wrap(ctx, () => packages.menu(ctx));
+    case 'testad': return wrap(ctx, () => testad.start(ctx));
     case 'copy': return wrap(ctx, () => copy.copyMenu(ctx));
     case 'drafts': return wrap(ctx, () => drafts.draftsMenu(ctx));
     case 'rep': return wrap(ctx, () => reports.report(ctx, 1));
@@ -83,6 +87,8 @@ async function routeCb(ctx) {
   if (d === 'alr:bal5') return wrap(ctx, () => alerts.setBalanceAlert(ctx, 5));
   if (d === 'alr:bal10') return wrap(ctx, () => alerts.setBalanceAlert(ctx, 10));
   if (d === 'alr:baloff') return wrap(ctx, () => alerts.removeBalanceAlert(ctx));
+  if (d.startsWith('pkg:')) { const [, act] = d.split(':'); return wrap(ctx, () => packages.onCb(ctx, act)); }
+  if (d.startsWith('ta:')) { const [, act, arg] = d.split(':'); return wrap(ctx, () => testad.onCb(ctx, act, arg)); }
   return ctx.answerCb();
 }
 
@@ -153,12 +159,22 @@ async function onUpdate(u) {
   const text = msg.text.trim();
 
   if (text.startsWith('/start') || text.startsWith('/menu')) return mainMenu(ctx);
-  if (text.startsWith('/cancel')) return wrap(ctx, () => copy.cancel(ctx));
+  if (text.startsWith('/cancel')) return wrap(ctx, async () => {
+    const closed = [];
+    if (testad.sessions.get(ctx.chatId)) { testad.sessions.kill(ctx.chatId); closed.push('🧪 Test-Ad funnel'); }
+    if (packages.sessions.has(ctx.chatId)) { packages.sessions.delete(ctx.chatId); closed.push('📦 Packages'); }
+    if (copy.resetState(ctx.chatId)) closed.push('✍️ Copy Studio');
+    return ctx.sm(closed.length
+      ? `${fmt.header('✅', 'CANCELLED')}\nClosed: <b>${closed.join(' · ')}</b>\n<i>Nothing was launched, nothing was spent.</i>`
+      : 'Nothing to cancel — you are not in a workflow.');
+  });
   if (text.startsWith('/health')) return wrap(ctx, () => admin.health(ctx));
   if (text.startsWith('/audit')) return wrap(ctx, () => admin.auditTail(ctx));
   if (text.startsWith('/ads')) return wrap(ctx, () => ads.adsMenu(ctx));
 
   if (await copy.onText(ctx, text)) return;
+  if (await testad.onText(ctx, text)) return;
+  if (await packages.onText(ctx, text)) return;
   if (research.researchMenu && /^[a-zA-Z0-9 @_]{3,40}$/.test(text) && !text.startsWith('/')) {
     // bare keyword -> research (quick path), unless a copy-studio step is active (handled above)
     return wrap(ctx, () => research.runSearch(ctx, text));

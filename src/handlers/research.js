@@ -12,6 +12,7 @@ async function researchMenu(ctx) {
     fmt.kb([
       [{ t: '🔥 Trading', c: 'res:q:trading' }, { t: '💰 Forex', c: 'res:q:forex' }],
       [{ t: '🪙 Crypto', c: 'res:q:crypto' }, { t: '📣 Marketing', c: 'res:q:marketing' }],
+      [{ t: '📦 Packages — client growth plan', c: 'menu:pkg', style: 'success' }],
       [{ t: '📁 Saved lists', c: 'res:lists' }], [{ t: '⬅️ Menu', c: 'menu:main' }]
     ]));
 }

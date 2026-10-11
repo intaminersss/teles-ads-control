@@ -33,7 +33,7 @@ const tgMock = {
   sm: (c, t, k) => rec('sm', c, t, k),
   edit: (c, m, t, k) => { const p = rec('edit', c, m, t, k); return p.then(r => r); },
   answerCb: (id, text) => rec('answerCb', id, text),
-  sendDoc: (c, n, d, cap) => rec('sendDoc', c, n, cap),
+  sendDoc: (c, n, d, cap) => rec('sendDoc', c, n, d, cap),
   sendAnimation: (c, f, cap, k) => rec('sendAnimation', c, f, cap, k),
   sendDraft: (c, id, t) => rec('sendDraft', c, id, t),
   typing: c => rec('typing', c),
@@ -69,9 +69,9 @@ const dbMock = {
 const adsMock = {
   getCurrentAccount: async () => { calls.push({ type: 'ads:getAccount' }); return { remaining_budget: 15.86 }; },
   getAdsList: async () => { calls.push({ type: 'ads:list' }); return SAMPLE_ADS; },
-  getAdsById: async ids => { calls.push({ type: 'ads:byId', args: ids }); return [SAMPLE_ADS.find(a => a.ad_id === ids[0]) || SAMPLE_ADS[0]]; },
+  getAdsById: async ids => { calls.push({ type: 'ads:byId', args: ids }); return (ids || []).map(id => SAMPLE_ADS.find(a => a.ad_id === id) || SAMPLE_ADS[0]); },
   getTargetChannel: async ch => { calls.push({ type: 'ads:target', args: [ch] }); return { id: 'x' }; },
-  createAd: async payload => { calls.push({ type: 'ads:create', args: [payload] }); return { ad_id: 555, status: 'in_review' }; },
+  createAd: async (payload, idemKey) => { calls.push({ type: 'ads:create', args: [payload, idemKey] }); return { ad_id: 555, status: 'in_review' }; },
   editAd: async (id, patch) => { calls.push({ type: 'ads:edit', args: [id, patch] }); return {}; },
   deleteAd: async id => { calls.push({ type: 'ads:delete', args: [id] }); return {}; },
   explain: e => e.message
@@ -81,8 +81,23 @@ const spyMock = {
   searchChannels: async ({ q }) => { calls.push({ type: 'spy:search', args: [q] }); return { rows: [
     { username: 'bmrtradingbot', title: 'BMR Trading', creativeCount: 264, niche: 'trading', lastSeenAt: '2026-10-11T00:00:00Z' },
     { username: 'goldsignals', title: 'Gold Signals', creativeCount: 90, niche: 'trading', lastSeenAt: '2026-10-10T00:00:00Z' }
+  ], total: 2, source: 'mock tgadsspy' }; },
+  searchAdvertisers: async ({ q }) => { calls.push({ type: 'spy:adv', args: [q] }); return { rows: [
+    { username: 'bmrtradingbot', title: 'BMR Trading', creativeCount: 264, niche: 'trading' },
+    { username: 'rivalchannel', title: 'Rival Signals', creativeCount: 42, niche: 'trading' }
   ], total: 2, source: 'mock tgadsspy' }; }
 };
+
+/* stub for global fetch (t.me/s/<channel> public preview) used by the growth engine */
+const TME_FIXTURE = `<html><div class="tgme_channel_info_header_title" dir="auto">Demo Trades</div>
+<div class="tgme_channel_info_counter"><span class="counter_value">12 400</span><span class="counter_type">subscribers</span></div>
+<div class="tgme_channel_info_description">Daily forex &amp; gold signals. XAUUSD entries every session.</div>
+<div class="tgme_widget_message_text" dir="auto">Gold smashed TP — 21 signals, 20 in plus this week</div><span class="tgme_widget_message_views">1.8K</span>
+<div class="tgme_widget_message_text" dir="auto">Free session at 09:00, join early</div><span class="tgme_widget_message_views">1.1K</span></html>`;
+const realFetch = globalThis.fetch;
+function stubTmeFetch() {
+  globalThis.fetch = async (url) => ({ ok: true, status: 200, text: async () => TME_FIXTURE });
+}
 
 /* install mocks BEFORE requiring the app */
 function setMock(file, exportsObj) {
@@ -121,8 +136,10 @@ test('E2E: /start → HERO animation + caption + tiered menu keyboard', async ()
   assert.ok(kb.inline_keyboard.flat().every(b => b.callback_data), 'all buttons wired');
 });
 
-test('E2E: every menu button routes to its screen (8/8)', async () => {
+test('E2E: every menu button routes to its screen (10/10)', async () => {
   const expects = [
+    ['menu:testad', t => /TEST AD FUNNEL/.test(t)],
+    ['menu:pkg', t => /PACKAGES/.test(t)],
     ['menu:ads', t => /LIVE ADS|ADS/.test(t)],
     ['menu:res', t => /RESEARCH/.test(t)],
     ['menu:copy', t => /COPY STUDIO/.test(t)],
@@ -271,4 +288,83 @@ test('E2E: /cancel with no active workflow → graceful', async () => {
   reset();
   await app.onUpdate(msgUpdate('/cancel'));
   assert.ok(lastOf('sm'), 'graceful reply');
+});
+
+test('E2E: packages — channel link → research → .md growth plan delivered', async () => {
+  stubTmeFetch();
+  try {
+    reset();
+    await app.onUpdate(cbUpdate('menu:pkg'));
+    const menu = lastOf('edit');
+    assert.ok(/PACKAGES/.test(String(menu.args[2])), 'packages screen shown');
+    reset();
+    await app.onUpdate(msgUpdate('t.me/demotraders'));
+    const doc = lastOf('sendDoc');
+    assert.ok(doc, 'plan document sent');
+    assert.ok(/\.md$/.test(String(doc.args[1])), 'filename is .md');
+    const md = String(doc.args[2]);
+    assert.ok(md.includes('# 🚀 GROWTH PLAN'), 'house format title');
+    assert.ok(md.includes('$150–300') && md.includes('$1,000–1,500'), 'agency pricing exact');
+    assert.ok(md.includes('12,400'), 'scraped subscriber count in plan');
+    assert.ok(md.includes('@rivalchannel'), 'competitors from ad archive');
+    assert.ok(md.includes('@forexsignals'), 'proven target channels');
+    assert.ok(md.toLowerCase().includes('english'), 'language auto-detected');
+    assert.ok(calls.find(c => c.type === 'db' && /audit_log/.test(c.args[0])), 'audited');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('E2E: test-ad funnel — full path: tests → geo → brief → link → budget → preview → GO LIVE ×2', async () => {
+  stubTmeFetch();
+  try {
+    reset();
+    await app.onUpdate(cbUpdate('menu:testad'));
+    assert.ok(/TEST AD FUNNEL/.test(String(lastOf('edit').args[2])), 'funnel started');
+    await app.onUpdate(cbUpdate('ta:n:2'));
+    assert.ok(/COUNTRY|GEO/i.test(String(lastOf('edit').args[2])), 'geo step');
+    await app.onUpdate(cbUpdate('ta:geo:in'));
+    assert.ok(/BRIEF/i.test(String(lastOf('edit').args[2])), 'brief step');
+    reset();
+    await app.onUpdate(msgUpdate('Promote our forex signals channel - 90% win rate, daily XAUUSD entries, free trial week for traders.'));
+    const linkStep = lastOf('edit') || lastOf('sm');
+    assert.ok(/CHANNEL LINK|④/i.test(String((linkStep.args)[linkStep.type === 'edit' ? 2 : 1])), 'link step');
+    reset();
+    await app.onUpdate(msgUpdate('t.me/demotraders'));
+    assert.ok(lastOf('sendDoc'), 'research plan .md attached mid-funnel');
+    const budget = lastOf('edit');
+    assert.ok(/BUDGET/i.test(String(budget.args[2])), 'budget step');
+    await app.onUpdate(cbUpdate('ta:bud:1.8'));
+    const prev = lastOf('edit');
+    assert.ok(/FULL AD PREVIEW/.test(String(prev.args[2])), 'preview shown');
+    assert.ok((prev.args[3]?.inline_keyboard || []).flat().some(b => /GO LIVE/.test(b.text)), 'live button present');
+    await app.onUpdate(cbUpdate('ta:go'));
+    assert.ok(/CONFIRM/.test(String(lastOf('edit').args[2])), 'confirm gate');
+    reset();
+    await app.onUpdate(cbUpdate('ta:go_go'));
+    const creates = calls.filter(c => c.type === 'ads:create');
+    assert.strictEqual(creates.length, 2, '2 tests = 2 real create calls');
+    const p = creates[0].args[0];
+    assert.strictEqual(p.target.country_codes[0], 'IN', 'India-first geo');
+    assert.ok(Array.isArray(p.target.channel_ids) && p.target.channel_ids.length >= 4, 'channel-only targeting (no keywords)');
+    assert.ok(p.target.channel_ids.every(ch => String(ch).startsWith('@')), 'channels are @handles');
+    assert.strictEqual(p.cpm, 0.6, 'fleet CPM');
+    assert.ok(creates[0].args[1].startsWith('testad-'), 'idempotency key namespaced');
+    assert.ok(/LIVE/.test(String(lastOf('edit').args[2])), 'success screen');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('E2E: reports — full .md document with per-ad sections + budget', async () => {
+  reset();
+  await app.onUpdate(cbUpdate('menu:rep'));
+  const doc = lastOf('sendDoc');
+  assert.ok(doc, 'report document sent');
+  assert.ok(/thetas-ads-report-.*\.md/.test(String(doc.args[1])), '.md filename');
+  const md = String(doc.args[2]);
+  assert.ok(md.includes('# 📊 THETAS AI — FULL ADS REPORT'), 'report header');
+  assert.ok(md.includes('## 🔥 Ad #96') || md.includes('Ad #96'), 'per-ad section 96');
+  assert.ok(md.includes('Ad #79'), 'per-ad section 79 (separately)');
+  assert.ok(md.includes('Spent'), 'budget block per ad');
+  assert.ok(md.includes('Daily cap'), 'daily budget per ad');
+  assert.ok(md.includes('FLEET SUMMARY'), 'summary table');
+  const preview = lastOf('edit') || lastOf('sm');
+  assert.ok(/report/i.test(String(preview.args[2] || preview.args[1])), 'in-chat summary');
 });

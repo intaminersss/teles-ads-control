@@ -127,4 +127,6 @@ async function toDraft(ctx) {
   await ctx.answerCb(`Draft saved (${d[0].id.slice(0, 8)}) — set a real promote_url in Drafts!`);
 }
 
-module.exports = { copyMenu, onText, pickTone, pickLang, toDraft, cancel };
+/* silent session clear (no message) — used by other funnels to avoid text-capture conflicts */
+const resetState = chatId => state.delete(chatId);
+module.exports = { copyMenu, onText, pickTone, pickLang, toDraft, cancel, resetState };
