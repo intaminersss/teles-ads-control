@@ -1,6 +1,6 @@
 'use strict';
 /* scheduler.js — in-process interval scheduler: daily digest + balance alerts (idempotent by date key). */
-const db = require('../db');
+const db = require('./db');
 const tg = require('./tg');
 const adsapi = require('./adsapi');
 const fmt = require('./format');
