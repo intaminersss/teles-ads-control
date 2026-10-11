@@ -4,6 +4,15 @@
    Attempt callbacks let handlers show REAL progress (actual attempt count — never fabricated %). */
 const { config, redact } = require('./config');
 const db = require('./db');
+const { AiResponseSchema, safeParse } = require('./validate');
+
+function anyOf(a, b) {
+  const merged = new AbortController();
+  const abort = () => merged.abort(b.reason || a.reason || new Error('stopped by user'));
+  a.signal.addEventListener('abort', abort, { once: true });
+  b.signal.addEventListener('abort', abort, { once: true });
+  return merged;
+}
 
 const keyRotation = new Map();
 const nextKey = (p) => {
@@ -61,7 +70,7 @@ async function budgetCheck(tgId) {
 }
 
 /* chat(messages, {purpose, tgId, maxTokens, onAttempt(p, attemptNo, total)}) */
-async function chat(messages, { purpose = 'general', tgId = null, maxTokens = 700, onAttempt } = {}) {
+async function chat(messages, { purpose = 'general', tgId = null, maxTokens = 700, onAttempt, onDelta, signal } = {}) {
   const budget = await budgetCheck(tgId);
   if (!budget.ok) { const e = new Error(budget.why); e.budget = true; throw e; }
 
@@ -79,34 +88,78 @@ async function chat(messages, { purpose = 'general', tgId = null, maxTokens = 70
       if (onAttempt) { try { onAttempt(p, attemptNo, total); } catch { /* progress must not break work */ } }
       const key = nextKey(p);
       if (!key) continue;
-      const ctl = new AbortController();
-      const t = setTimeout(() => ctl.abort(), config.AI_TIMEOUT_MS);
-      try {
-        const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
-        if (p === 'openrouter') { headers['HTTP-Referer'] = 'https://teles-ads.local'; headers['X-Title'] = 'TelesAdsControl'; }
-        const res = await fetch(prov.base, {
-          method: 'POST', headers, signal: ctl.signal,
-          body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.7 })
-        });
-        const j = await res.json().catch(() => ({}));
-        const text = j.choices?.[0]?.message?.content;
-        if (!res.ok || !text) {
-          const kind = classify(String(res.status) + ' ' + String(j.error?.message || '').slice(0, 80));
-          errors.push(`${p}/${model}: HTTP ${res.status} [${kind}] ${redact(String(j.error?.message || '').slice(0, 90))}`);
-          if (kind === 'auth' || kind === 'rate') { recordFail(p); break; } // key/model dead → next provider, mark breaker
-          continue; // bad_request → try next model on same provider (no breaker)
-        }
-        recordSuccess(p);
-        const usage = j.usage || {};
-        await db.q(`insert into ai_usage(tg_id,provider,model,purpose,prompt_tokens,completion_tokens,est_cost_usd)
-                    values ($1,$2,$3,$4,$5,$6,$7)`,
-          [tgId, p, model, purpose, usage.prompt_tokens || 0, usage.completion_tokens || 0, estCost(usage.prompt_tokens, usage.completion_tokens)]);
-        return { text, meta: { provider: p, model, est_cost_usd: estCost(usage.prompt_tokens, usage.completion_tokens), attempts: attemptNo, skipped_providers: skipped } };
-      } catch (e) {
-        const kind = classify(e.name === 'AbortError' ? 'timeout' : e.message);
-        errors.push(`${p}/${model}: [${kind}] ${redact(e.message)}`);
-        if (kind === 'transient' || kind === 'rate') recordFail(p);
-      } finally { clearTimeout(t); }
+      // provider attempt: 1 bounded retry with jitter + Retry-After (spec §13)
+      for (let tryNo = 1; tryNo <= 2; tryNo++) {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), config.AI_TIMEOUT_MS);
+        try {
+          const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` };
+          if (p === 'openrouter') { headers['HTTP-Referer'] = 'https://teles-ads.local'; headers['X-Title'] = 'TelesAdsControl'; }
+          const res = await fetch(prov.base, {
+            method: 'POST', headers, signal: signal ? anyOf([ctl, signal]) : ctl.signal,
+            body: JSON.stringify(onDelta
+              ? { model, messages, max_tokens: maxTokens, temperature: 0.7, stream: true }
+              : { model, messages, max_tokens: maxTokens, temperature: 0.7 })
+          });
+          if (res.status === 429 || res.status >= 500) {
+            const ra = Number(res.headers.get('retry-after') || 0) * 1000;
+            const wait = Math.min(8000, (ra || 1200 * tryNo) + Math.floor(Math.random() * 400)); // jittered, capped
+            if (tryNo === 1) { await new Promise(r => setTimeout(r, wait)); continue; }
+          }
+          let raw, text, usage, check;
+          if (onDelta && res.ok && (res.headers.get('content-type') || '').includes('text/event-stream')) {
+            // SSE streaming — accumulate deltas, push running text to onDelta (official draft UX)
+            const reader = res.body.getReader();
+            const dec = new TextDecoder();
+            let buf = '', acc = '';
+            usage = null;
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += dec.decode(value, { stream: true });
+              let nl;
+              while ((nl = buf.indexOf('\n')) >= 0) {
+                const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+                if (!line.startsWith('data:')) continue;
+                const payload = line.slice(5).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                  const part = JSON.parse(payload);
+                  const piece = part.choices?.[0]?.delta?.content || '';
+                  if (piece) { acc += piece; if (onDelta) { try { onDelta(acc); } catch {} } }
+                  if (part.usage) usage = part.usage;
+                } catch { /* skip malformed chunk lines */ }
+              }
+            }
+            text = acc;
+            raw = { choices: [{ message: { content: acc } }], usage: usage || {} };
+            check = { ok: true };
+            if (!text) throw new Error('stream produced no content');
+          } else {
+            raw = await res.json().catch(() => ({}));
+            check = safeParse(AiResponseSchema, raw, `provider ${p} response`);
+            text = check.ok ? check.value.choices[0].message.content : undefined;
+            if (!check.ok && res.ok) { errors.push(`${p}/${model}: malformed payload — ${check.error}`); break; }
+          }
+          if (!res.ok || !check.ok || !text) {
+            const kind = classify(String(res.status) + ' ' + String(raw.error?.message || '').slice(0, 80));
+            errors.push(`${p}/${model}: HTTP ${res.status} [${kind}] ${redact(String(raw.error?.message || (check.ok ? 'empty content' : check.error)).slice(0, 90))}`);
+            if (kind === 'auth' || kind === 'rate') { recordFail(p); break; } // key/route dead → next provider
+            break; // bad_request/malformed → next model/provider (no retry, no breaker)
+          }
+          recordSuccess(p);
+          usage = raw.usage || {};
+          await db.q(`insert into ai_usage(tg_id,provider,model,purpose,prompt_tokens,completion_tokens,est_cost_usd)
+                      values ($1,$2,$3,$4,$5,$6,$7)`,
+            [tgId, p, model, purpose, usage.prompt_tokens || 0, usage.completion_tokens || 0, estCost(usage.prompt_tokens, usage.completion_tokens)]);
+          return { text, meta: { provider: p, model, est_cost_usd: estCost(usage.prompt_tokens, usage.completion_tokens), attempts: attemptNo, skipped_providers: skipped } };
+        } catch (e) {
+          const kind = classify(e.name === 'AbortError' ? 'timeout' : e.message);
+          errors.push(`${p}/${model}: [${kind}] ${redact(e.message)}`);
+          if (kind === 'transient' || kind === 'rate') recordFail(p);
+          break; // timeouts don't retry within same model — move on (bounded)
+        } finally { clearTimeout(t); }
+      }
     }
   }
   throw new Error(`All AI providers failed — ${errors.slice(0, 3).join(' | ')}`);

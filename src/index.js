@@ -16,7 +16,8 @@ const alerts = require('./handlers/alerts');
 const admin = require('./handlers/admin');
 const scheduler = require('./scheduler');
 
-const log = m => console.log(`[${new Date().toISOString()}] ${redact(m)}`);
+const { log } = require('./log');
+const logLine = m => log.info(m);
 
 /* ctx — wraps message/callback context for handlers */
 function makeCtx(u) {
@@ -53,6 +54,7 @@ async function routeMenu(ctx, sub) {
 
 async function routeCb(ctx) {
   const d = ctx.data;
+  if (ctx.data && ctx.data !== 'noop') ctx.answerCb().catch(() => {}); // every tap acknowledged
   if (d.startsWith('menu:')) return routeMenu(ctx, d.slice(5));
   if (d.startsWith('ads:refresh')) return wrap(ctx, () => ads.adsMenu(ctx));
   if (d.startsWith('ad:')) { const [, id, act] = d.split(':'); return act ? wrap(ctx, () => ads.adAction(ctx, Number(id), act)) : wrap(ctx, () => ads.adDetail(ctx, Number(id))); }
@@ -62,6 +64,7 @@ async function routeCb(ctx) {
   if (d.startsWith('res:save:')) return research.saveChannel(ctx, d.slice(9));
   if (d === 'res:lists') return wrap(ctx, () => research.lists(ctx));
   if (d.startsWith('res:csv:')) return wrap(ctx, () => research.exportCsv(ctx, Number(d.slice(8))));
+  if (d === 'copy:cancel') return wrap(ctx, () => copy.cancel(ctx));
   if (d.startsWith('copy:tone:')) return wrap(ctx, () => copy.pickTone(ctx, d.slice(10)));
   if (d.startsWith('copy:lang:')) return wrap(ctx, () => copy.pickLang(ctx, d.slice(10)));
   if (d === 'copy:to_draft') return copy.toDraft(ctx);
@@ -104,7 +107,14 @@ function wrap(ctx, fn) {
 }
 
 /* ---- update handler ---- */
+const stoppedGenerations = new Map(); // chatId -> AbortController (streaming copy)
 async function onUpdate(u) {
+  if (u.stopped_message_generation) {
+    const chatId = u.stopped_message_generation.chat?.id;
+    const ctl = stoppedGenerations.get(chatId);
+    if (ctl) { ctl.abort(); stoppedGenerations.delete(chatId); log.info(`user stopped generation in ${chatId}`); }
+    return;
+  }
   const ctx = makeCtx(u);
   if (!ctx.from) return;
   if (!guard.isAllowed(ctx.from.id)) {
@@ -120,6 +130,7 @@ async function onUpdate(u) {
   const text = msg.text.trim();
 
   if (text.startsWith('/start') || text.startsWith('/menu')) return mainMenu(ctx);
+  if (text.startsWith('/cancel')) return wrap(ctx, () => copy.cancel(ctx));
   if (text.startsWith('/health')) return wrap(ctx, () => admin.health(ctx));
   if (text.startsWith('/audit')) return wrap(ctx, () => admin.auditTail(ctx));
   if (text.startsWith('/ads')) return wrap(ctx, () => ads.adsMenu(ctx));
@@ -138,11 +149,19 @@ http.createServer((req, res) => {
 }).listen(config.PORT, () => log(`health server on :${config.PORT}`));
 
 /* ---- boot ---- */
+process.telesStopped = stoppedGenerations; // runtime registry shared with copy handler
+
 (async () => {
-  log('TELES ADS CONTROL booting…');
+  log.info('TELES ADS CONTROL booting…');
   const me = await tg.getMe();
-  log(`authorized as @${me.username}`);
-  if (config.BOT_MODE !== 'polling') log('WARNING: BOT_MODE != polling — spec forbids webhook; forcing polling.');
-  scheduler.start(log);
+  await tg.call('setMyCommands', { commands: [
+    { command: 'start', description: 'Open the control desk' },
+    { command: 'ads', description: 'Live ads board' },
+    { command: 'health', description: 'System health' },
+    { command: 'audit', description: 'Recent action log' }
+  ] }).catch(e => log.warn(`setMyCommands: ${e.message}`));
+  log.info(`authorized as @${me.username}`);
+  if (config.BOT_MODE !== 'polling') log.warn('BOT_MODE != polling — spec forbids webhook; forcing polling.');
+  scheduler.start(logLine);
   await tg.pollLoop(onUpdate, log);
-})().catch(e => { log(`FATAL boot: ${redact(e.stack || e.message)}`); process.exit(1); });
+})().catch(e => { log.error(`FATAL boot: ${e.stack || e.message}`); process.exit(1); });

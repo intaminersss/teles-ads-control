@@ -58,7 +58,7 @@ async function adAction(ctx, id, action) {
     guard.askConfirm(key, { id, action });
     return ctx.editOrSend(
       `⚠️ <b>Confirm: ${confirmables[action]} ad #${id}?</b>\nThis is a consequential live-platform action.`,
-      fmt.kb([[{ t: `✅ Yes, ${confirmables[action]}`, c: `${key}_go` }], [{ t: '❌ Cancel', c: `ad:${id}` }]]));
+      fmt.kb([[{ t: `✅ Yes, ${confirmables[action]}`, c: `${key}_go`, style: action === 'resume' ? 'success' : 'danger' }], [{ t: '❌ Cancel', c: `ad:${id}` }]]));
   }
   if (guard.alreadyDone(key)) return ctx.answerCb('Already done just now — not repeating.');
   let result = 'ok';

@@ -18,7 +18,7 @@ async function draftsMenu(ctx) {
 async function draftDetail(ctx, id) {
   const d = await db.one(`select * from drafts where id=$1`, [id]);
   if (!d) return ctx.answerCb('Draft not found');
-  const kbRows = [[{ t: '🚀 Launch (1.8 TON)', c: `draft:${id}:lc` }],
+  const kbRows = [[{ t: '🚀 Launch (1.8 TON)', c: `draft:${id}:lc`, style: 'primary' }],
                   [{ t: '🗑️ Archive', c: `draft:${id}:arch` }], [{ t: '⬅️ Drafts', c: 'menu:drafts' }]];
   const target = typeof d.target === 'string' ? JSON.parse(d.target) : d.target;
   await ctx.editOrSend([
