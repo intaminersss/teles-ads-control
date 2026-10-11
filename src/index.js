@@ -14,6 +14,7 @@ const drafts = require('./handlers/drafts');
 const reports = require('./handlers/reports');
 const alerts = require('./handlers/alerts');
 const packages = require('./handlers/packages');
+const account = require('./handlers/account');
 const testad = require('./handlers/testad');
 const admin = require('./handlers/admin');
 const scheduler = require('./scheduler');
@@ -46,6 +47,7 @@ async function routeMenu(ctx, sub) {
     case 'ads': return wrap(ctx, () => ads.adsMenu(ctx));
     case 'res': return wrap(ctx, () => research.researchMenu(ctx));
     case 'pkg': return wrap(ctx, () => packages.menu(ctx));
+    case 'acc': return wrap(ctx, () => account.hub(ctx));
     case 'testad': return wrap(ctx, () => testad.start(ctx));
     case 'copy': return wrap(ctx, () => copy.copyMenu(ctx));
     case 'drafts': return wrap(ctx, () => drafts.draftsMenu(ctx));
@@ -83,6 +85,21 @@ async function routeCb(ctx) {
   }
   if (d.startsWith('rep:csv:')) return wrap(ctx, () => reports.exportCsv(ctx, Number(d.slice(8))));
   if (d === 'rep:7') return wrap(ctx, () => reports.report(ctx, 7));
+  if (d.startsWith('ads:sort:')) return wrap(ctx, () => ads.cycleSort(ctx, d.slice(9)));
+  if (d === 'ads:winners') return wrap(ctx, () => ads.winners(ctx));
+  if (d.startsWith('ads:bulk:')) { const [, , kind] = d.split(':'); return wrap(ctx, () => ads.bulk(ctx, kind)); }
+  if (d.startsWith('acc:')) {
+    const rest = d.slice(4); const i = rest.indexOf(':');
+    const act = i === -1 ? rest : rest.slice(0, i);
+    const arg = i === -1 ? null : rest.slice(i + 1);
+    return wrap(ctx, () => account.onCb(ctx, act, arg));
+  }
+  if (d.startsWith('sec:')) return wrap(ctx, () => sectionScreen(ctx, d.slice(4)));
+  if (d.startsWith('feat:')) {
+    const [, a, b] = d.split(':');
+    if (a === 'p') return wrap(ctx, () => catalogScreen(ctx, Number(b) || 0));
+    return wrap(ctx, () => featureScreen(ctx, Number(a)));
+  }
   if (d === 'alr:digest') return wrap(ctx, () => alerts.toggleDigest(ctx));
   if (d === 'alr:bal5') return wrap(ctx, () => alerts.setBalanceAlert(ctx, 5));
   if (d === 'alr:bal10') return wrap(ctx, () => alerts.setBalanceAlert(ctx, 10));
@@ -163,6 +180,7 @@ async function onUpdate(u) {
     const closed = [];
     if (testad.sessions.get(ctx.chatId)) { testad.sessions.kill(ctx.chatId); closed.push('🧪 Test-Ad funnel'); }
     if (packages.sessions.has(ctx.chatId)) { packages.sessions.delete(ctx.chatId); closed.push('📦 Packages'); }
+    if (account.sessions.get(ctx.chatId)) { account.sessions.kill(ctx.chatId); closed.push('🏦 Add-account'); }
     if (copy.resetState(ctx.chatId)) closed.push('✍️ Copy Studio');
     return ctx.sm(closed.length
       ? `${fmt.header('✅', 'CANCELLED')}\nClosed: <b>${closed.join(' · ')}</b>\n<i>Nothing was launched, nothing was spent.</i>`
@@ -173,6 +191,7 @@ async function onUpdate(u) {
   if (text.startsWith('/ads')) return wrap(ctx, () => ads.adsMenu(ctx));
 
   if (await copy.onText(ctx, text)) return;
+  if (await account.onText(ctx, text)) return;
   if (await testad.onText(ctx, text)) return;
   if (await packages.onText(ctx, text)) return;
   if (research.researchMenu && /^[a-zA-Z0-9 @_]{3,40}$/.test(text) && !text.startsWith('/')) {
@@ -193,6 +212,45 @@ healthSrv.unref(); // never hold the process/event loop open (tests exit clean)
 
 /* ---- boot (only when run directly; require() exports router for tests) ---- */
 process.telesStopped = stoppedGenerations; // runtime registry shared with copy handler
+
+/* ---- v6 feature hub screens (data-driven from fmt.CATALOG) ---- */
+function sectionScreen(ctx, sid) {
+  const meta = fmt.SECTION_META[sid];
+  if (!meta) return ctx.editOrSend('❌ Unknown section.', MENU);
+  const feats = fmt.catalogSection(sid);
+  return ctx.editOrSend(
+    `${fmt.header(meta.i, meta.t)}\n<i>${feats.length} features — tap for detail</i>`,
+    fmt.kb([
+      ...feats.map(f => [{ t: `${f.i}  ${f.n}`, c: `feat:${f.idx}` }]),
+      [{ t: '📜 All features', c: 'feat:p:0' }, { t: '⬅️ Desk', c: 'menu:main' }]
+    ]));
+}
+function catalogScreen(ctx, page) {
+  const { items, page: p, pages, total } = fmt.catalogPage(page);
+  return ctx.editOrSend(
+    `${fmt.header('📜', `ALL FEATURES — ${total} total`)}\n<i>page ${p + 1}/${pages} — tap any for detail + shortcut</i>`,
+    fmt.kb([
+      ...items.map(f => [{ t: `${f.i}  ${f.n}`, c: `feat:${f.idx}` }]),
+      [...(p > 0 ? [{ t: '◀️ Prev', c: `feat:p:${p - 1}` }] : []), ...(p < pages - 1 ? [{ t: 'Next ▶️', c: `feat:p:${p + 1}` }] : [])],
+      [{ t: '⬅️ Desk', c: 'menu:main' }]
+    ]));
+}
+function featureScreen(ctx, idx) {
+  const f = fmt.feature(idx);
+  if (!f) return ctx.editOrSend('❌ Feature not found.', MENU);
+  const meta = fmt.SECTION_META[f.s];
+  return ctx.editOrSend(
+    [
+      `${f.i} <b>${fmt.esc(f.n)}</b>`,
+      `<i>${meta ? meta.i + ' ' + meta.t : f.s}</i>`,
+      '',
+      fmt.esc(f.d)
+    ].join('\n'),
+    fmt.kb([
+      ...(f.cb ? [[{ t: '▶️ Open now', c: f.cb, style: 'primary' }]] : []),
+      [{ t: '⬅️ Catalog', c: `feat:p:${Math.floor(idx / 8)}` }, { t: '🏠 Desk', c: 'menu:main' }]
+    ]));
+}
 
 module.exports = { onUpdate, makeCtx, routeCb, mainMenu, stoppedGenerations };
 

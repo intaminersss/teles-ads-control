@@ -10,15 +10,25 @@
    - NOT available: audience demographics, reach forecasts, conversion attribution. */
 const { config, redact } = require('./config');
 
-async function adsCall(method, { body = {}, idemKey } = {}) {
-  if (!config.ADS_API_TOKEN) throw new Error('ADS_API_TOKEN not configured');
+/* ---- multi-account support (v6): handlers/account.js switches the active ads account.
+     Per-call override wins over the module override; module override wins over env. ---- */
+let TOKEN_OVERRIDE = null;                       // active account token (from ad_accounts table)
+let OVERRIDE_LABEL = null;                       // human label for screens
+const setAccount = (token, label = null) => { TOKEN_OVERRIDE = token || null; OVERRIDE_LABEL = label; };
+const clearAccount = () => { TOKEN_OVERRIDE = null; OVERRIDE_LABEL = null; };
+const activeToken = () => TOKEN_OVERRIDE || config.ADS_API_TOKEN || '';
+const accountLabel = () => OVERRIDE_LABEL || (TOKEN_OVERRIDE ? 'custom account' : 'default (env)');
+
+async function adsCall(method, { body = {}, idemKey, token } = {}) {
+  const auth = token || activeToken();
+  if (!auth) throw new Error('ADS_API_TOKEN not configured');
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 25000);
   try {
     const res = await fetch(`${config.ADS_API_BASE}/${method}`, {
       method: body && Object.keys(body).length ? 'POST' : 'GET',
       headers: {
-        'Authorization': `Bearer ${config.ADS_API_TOKEN}`,
+        'Authorization': `Bearer ${auth}`,
         'User-Agent': 'Mozilla/5.0',
         'Content-Type': 'application/json',
         ...(idemKey ? { 'Idempotency-Key': idemKey } : {})
@@ -49,4 +59,4 @@ const createAd = (payload, idemKey) => adsCall('createAd', { body: payload, idem
 const editAd = (ad_id, patch) => adsCall('editAd', { body: { ad_id, ...patch } });
 const deleteAd = ad_id => adsCall('deleteAd', { body: { ad_id } });
 
-module.exports = { adsCall, getCurrentAccount, getAdsList, getAdsById, getTargetChannel, createAd, editAd, deleteAd, explain };
+module.exports = { adsCall, getCurrentAccount, getAdsList, getAdsById, getTargetChannel, createAd, editAd, deleteAd, explain, setAccount, clearAccount, accountLabel, activeToken };

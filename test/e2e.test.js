@@ -17,7 +17,7 @@ const calls = [];
 const rec = (type, ...args) => { calls.push({ type, args }); return Promise.resolve(mockResults(type, args)); };
 
 const SAMPLE_ADS = [
-  { ad_id: 96, status: 'active', views: 1200, clicks: 40, joins: 8, spent_budget: 1.9 },
+  { ad_id: 96, status: 'active', views: 1200, clicks: 40, joins: 20, spent_budget: 1.9, text: 'Win-rate proof creative #96', promote_url: 'https://t.me/real', cpm: 0.6 },
   { ad_id: 79, status: 'on_hold', views: 18158, clicks: 329, joins: 63, spent_budget: 9.84, daily_budget_limit: 5, remaining_budget: 4.76 }
 ];
 const SAMPLE_DRAFT = { id: 'abc-uuid', title: 'Test draft', text: 'Test ad text', promote_url: 'https://t.me/real', target: { type: 'users' }, cpm: 0.6, placement: 'channel_post', initial_budget: 1.8, daily_budget_limit: 2, status: 'draft', launched_ad_id: null };
@@ -47,6 +47,8 @@ const dbMock = {
   q: async (sql) => {
     calls.push({ type: 'db', args: [String(sql).slice(0, 60)] });
     if (/insert into research_lists/.test(sql)) return [{ id: 1 }];
+    if (/insert into ad_accounts/.test(sql)) return [{ id: 2 }];
+    if (/from ad_accounts/.test(sql)) return [{ id: 2, label: 'Second Desk', token: 'AAHPxyz000000000000000111', balance_ton: 9.5, is_default: false }];
     if (/insert into drafts/.test(sql)) return [{ id: 'new-draft-id' }];
     if (/from research_lists/.test(sql)) return [{ id: 1, name: 'default', n: 2 }];
     if (/from research_list_items/.test(sql)) return [{ username: 'samplechan', title: 'Sample', members: 1000, niche: 'trading', note: null, added_at: new Date() }];
@@ -74,7 +76,12 @@ const adsMock = {
   createAd: async (payload, idemKey) => { calls.push({ type: 'ads:create', args: [payload, idemKey] }); return { ad_id: 555, status: 'in_review' }; },
   editAd: async (id, patch) => { calls.push({ type: 'ads:edit', args: [id, patch] }); return {}; },
   deleteAd: async id => { calls.push({ type: 'ads:delete', args: [id] }); return {}; },
-  explain: e => e.message
+  explain: e => e.message,
+  adsCall: async (method, opts = {}) => { calls.push({ type: 'ads:call', args: [method, opts] }); return { remaining_budget: 9.5, account: { name: 'Second Desk' } }; },
+  setAccount: (token, label) => calls.push({ type: 'ads:setAccount', args: [token ? String(token).slice(-4) : null, label] }),
+  clearAccount: () => calls.push({ type: 'ads:clearAccount' }),
+  accountLabel: () => (calls.find(c => c.type === 'ads:setAccount') ? 'Second Desk' : 'default (env)'),
+  activeToken: () => 'tok'
 };
 
 const spyMock = {
@@ -140,6 +147,7 @@ test('E2E: every menu button routes to its screen (10/10)', async () => {
   const expects = [
     ['menu:testad', t => /TEST AD FUNNEL/.test(t)],
     ['menu:pkg', t => /PACKAGES/.test(t)],
+    ['menu:acc', t => /ACCOUNTS/.test(t)],
     ['menu:ads', t => /LIVE ADS|ADS/.test(t)],
     ['menu:res', t => /RESEARCH/.test(t)],
     ['menu:copy', t => /COPY STUDIO/.test(t)],
@@ -367,4 +375,86 @@ test('E2E: reports — full .md document with per-ad sections + budget', async (
   assert.ok(md.includes('FLEET SUMMARY'), 'summary table');
   const preview = lastOf('edit') || lastOf('sm');
   assert.ok(/report/i.test(String(preview.args[2] || preview.args[1])), 'in-chat summary');
+});
+
+test('E2E: accounts — hub, add (live-validated), switch active, delete gate', async () => {
+  reset();
+  await app.onUpdate(cbUpdate('menu:acc'));
+  const hub = lastOf('edit');
+  assert.ok(/ACCOUNTS/.test(String(hub.args[2])), 'hub screen');
+  assert.ok(hub.args[3].inline_keyboard.flat().some(b => b.callback_data === 'acc:add'), 'add button');
+  reset();
+  await app.onUpdate(cbUpdate('acc:add'));
+  assert.ok(/ADD ADS ACCOUNT/.test(String(lastOf('edit').args[2])), 'add screen');
+  reset();
+  await app.onUpdate(msgUpdate('AAHPxyz000000000000000111'));
+  const call = calls.find(c => c.type === 'ads:call');
+  assert.ok(call && call.args[0] === 'getCurrentAccount' && call.args[1].token === 'AAHPxyz000000000000000111', 'candidate token validated against platform');
+  assert.ok(calls.find(c => c.type === 'db' && /insert into ad_accounts/.test(c.args[0])), 'saved to DB');
+  assert.ok(/ACCOUNT SAVED/.test(String(calls.filter(c => c.type === 'edit').slice(-1)[0].args[2])), 'success screen');
+  assert.ok(!JSON.stringify(calls).includes('AAHPxyz000000000000000111x9'), 'token not echoed beyond masked use');
+  reset();
+  await app.onUpdate(cbUpdate('acc:sw:2'));
+  assert.ok(calls.find(c => c.type === 'ads:setAccount' && c.args[0] === '0111'), 'active account switched (token override)');
+  assert.ok(/ACCOUNTS/.test(String(lastOf('edit').args[2])), 'back to hub after switch');
+  reset();
+  await app.onUpdate(cbUpdate('acc:rm:2'));
+  assert.ok(/Remove this account/.test(String(lastOf('edit').args[2])), 'remove is confirm-gated');
+  await app.onUpdate(cbUpdate('acc:rm:2:go'));
+  assert.ok(calls.find(c => c.type === 'db' && /set removed=true/.test(c.args[0])), 'detached after confirm');
+});
+
+test('E2E: ads manager — sort cycle, winners board, bulk pause gate→execute, clone→draft, delc fix', async () => {
+  reset();
+  await app.onUpdate(cbUpdate('menu:ads'));
+  assert.ok(/LIVE ADS/.test(String(lastOf('edit').args[2])), 'board renders');
+  await app.onUpdate(cbUpdate('ads:sort:cpj'));
+  assert.ok(/sorted: /.test(String(lastOf('edit').args[2])), 'sort applied (cycle note shown)');
+  reset();
+  await app.onUpdate(cbUpdate('ads:winners'));
+  const w = lastOf('edit');
+  assert.ok(/WINNERS/.test(String(w.args[2])), 'winners screen');
+  assert.ok(w.args[3].inline_keyboard.flat().some(b => b.callback_data === 'ad:96:capup'), 'winner push button present');
+  reset();
+  await app.onUpdate(cbUpdate('ads:bulk:pause'));
+  assert.ok(/PAUSE ALL ACTIVE ADS/.test(String(lastOf('edit').args[2])), 'bulk gate');
+  reset();
+  await app.onUpdate(cbUpdate('ads:bulk:pause:_go'));
+  const edits = calls.filter(c => c.type === 'ads:edit');
+  assert.ok(edits.length >= 1 && edits.every(c => c.args[1].is_paused === true), 'bulk executed: active ads paused via API');
+  assert.ok(/BULK DONE/.test(String(lastOf('edit').args[2])), 'bulk summary');
+  reset();
+  await app.onUpdate(cbUpdate('ad:96:clone'));
+  assert.ok(calls.find(c => c.type === 'db' && /insert into drafts/.test(c.args[0])), 'clone inserted draft');
+  assert.ok(/CLONED TO DRAFTS/.test(String(lastOf('edit').args[2])), 'clone screen');
+  reset();
+  await app.onUpdate(cbUpdate('ad:96:delc'));
+  assert.ok(/Confirm: DELETE/.test(String(lastOf('edit').args[2])), 'delc legacy label now gates DELETE (dead-button fix)');
+});
+
+test('E2E: feature hub — desk button, catalog pages, ALL 50+ features render, sections', async () => {
+  const { CATALOG } = require('../src/ui');
+  assert.ok(CATALOG.length >= 50, `catalog has ${CATALOG.length} features (>=50 required)`);
+  reset();
+  await app.onUpdate(cbUpdate('menu:main'));
+  const desk = lastOf('edit');
+  assert.ok(desk.args[3].inline_keyboard.flat().some(b => b.callback_data === 'feat:p:0'), 'desk has All-features button');
+  reset();
+  await app.onUpdate(cbUpdate('feat:p:0'));
+  assert.ok(/ALL FEATURES/.test(String(lastOf('edit').args[2])), 'catalog page 1');
+  const totalPages = Math.ceil(CATALOG.length / 8);
+  for (let p = 1; p < totalPages; p++) await app.onUpdate(cbUpdate(`feat:p:${p}`));
+  assert.ok(new RegExp(`page ${totalPages}/`).test(String(lastOf('edit').args[2])), `all ${totalPages} catalog pages paginate`);
+  reset();
+  for (let i = 0; i < CATALOG.length; i++) {
+    await app.onUpdate(cbUpdate(`feat:${i}`));
+    const scr = lastOf('edit');
+    assert.ok(scr && new RegExp(CATALOG[i].n.slice(0, 12).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(String(scr.args[2])), `feature ${i} (${CATALOG[i].n}) renders`);
+  }
+  reset();
+  await app.onUpdate(cbUpdate('sec:ads'));
+  assert.ok(/ADS MANAGER/.test(String(lastOf('edit').args[2])), 'section screen');
+  reset();
+  await app.onUpdate(cbUpdate('feat:0'));
+  assert.ok(lastOf('edit').args[3].inline_keyboard.flat().some(b => b.callback_data === 'menu:ads'), 'feature detail offers Open shortcut');
 });

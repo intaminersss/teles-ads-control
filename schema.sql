@@ -62,3 +62,18 @@ create table if not exists jobs (
   last_error text, created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- v6: multi ads-account manager
+create table if not exists ad_accounts(
+  id serial primary key,
+  label text not null,
+  token text not null unique,
+  platform_username text,
+  balance_ton numeric,
+  is_default boolean default false,
+  added_by bigint,
+  note text,
+  created_at timestamptz default now(),
+  removed boolean default false
+);
+create index if not exists idx_ad_accounts_default on ad_accounts(is_default) where not removed;
