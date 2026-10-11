@@ -93,3 +93,12 @@ test('buildPlanMd: house format, exact agency pricing, language-adapted, target 
   const hi = growth.buildPlanMd({ ...res, lang: 'hi' });
   assert.ok(hi.includes('ग्रोथ प्लान'), 'hindi variant');
 });
+
+
+test('setPricing/getPricing roundtrip (owner pricing editor)', () => {
+  const before = growth.getPricing().test;
+  growth.setPricing({ test: '$200–400' });
+  assert.strictEqual(growth.getPricing().test, '$200–400');
+  growth.setPricing({ test: before });
+  assert.strictEqual(growth.getPricing().test, before);
+});

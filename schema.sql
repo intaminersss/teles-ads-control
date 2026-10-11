@@ -77,3 +77,9 @@ create table if not exists ad_accounts(
   removed boolean default false
 );
 create index if not exists idx_ad_accounts_default on ad_accounts(is_default) where not removed;
+
+-- v7: settings, plans archive, live per-ad alert rules + state
+create table if not exists agency_settings(key text primary key, value text);
+create table if not exists plans_archive(id serial primary key, username text, lang text, md text, created_at timestamptz default now(), followup_at timestamptz, followup_sent boolean default false);
+create table if not exists ad_alerts_rules(ad_id bigint primary key, per_1k boolean default false, per_join boolean default false, per_spend boolean default false, updated_at timestamptz default now());
+create table if not exists ad_alerts_state(ad_id bigint primary key, last_views_1k int default 0, last_joins int default 0, last_spent_half numeric default 0, updated_at timestamptz default now());

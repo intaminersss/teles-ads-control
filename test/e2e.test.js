@@ -48,6 +48,12 @@ const dbMock = {
     calls.push({ type: 'db', args: [String(sql).slice(0, 60)] });
     if (/insert into research_lists/.test(sql)) return [{ id: 1 }];
     if (/insert into ad_accounts/.test(sql)) return [{ id: 2 }];
+    if (/from ad_alerts_rules/.test(sql)) return [{ ad_id: 96, per_1k: true, per_join: true, per_spend: true }];
+    if (/from ad_alerts_state/.test(sql)) return [{ ad_id: 96, last_views_1k: 0, last_joins: 0, last_spent_half: 1, updated_at: new Date() }];
+    if (/from plans_archive/.test(sql)) return [{ id: 1, username: 'demochan', lang: 'en', md: '# plan', created_at: new Date() }];
+    if (/min\(captured_at\)/.test(sql)) return [{ f: new Date(Date.now() - 12 * 86400e3) }];
+    if (/from drafts where status='draft'/.test(sql)) return [{ id: 'abc-uuid', title: 'Test draft', status: 'draft' }];
+    if (/select key,value from agency_settings/.test(sql)) return [];
     if (/from ad_accounts/.test(sql)) return [{ id: 2, label: 'Second Desk', token: 'AAHPxyz000000000000000111', balance_ton: 9.5, is_default: false }];
     if (/insert into drafts/.test(sql)) return [{ id: 'new-draft-id' }];
     if (/from research_lists/.test(sql)) return [{ id: 1, name: 'default', n: 2 }];
@@ -457,4 +463,116 @@ test('E2E: feature hub — desk button, catalog pages, ALL 50+ features render, 
   reset();
   await app.onUpdate(cbUpdate('feat:0'));
   assert.ok(lastOf('edit').args[3].inline_keyboard.flat().some(b => b.callback_data === 'menu:ads'), 'feature detail offers Open shortcut');
+});
+
+test('E2E v7: live alerts — per-ad rules, toggles, global, engine fires per-ad notifications', async () => {
+  reset();
+  await app.onUpdate(cbUpdate('alr2:hub'));
+  assert.ok(/LIVE ALERTS/.test(String(lastOf('edit').args[2])), 'alerts hub');
+  await app.onUpdate(cbUpdate('alr2:pick'));
+  assert.ok(/Which campaign/.test(String(lastOf('edit').args[2])), 'ad picker');
+  await app.onUpdate(cbUpdate('alr2:ad:96'));
+  assert.ok(/Ad #96/.test(String(lastOf('edit').args[2])), 'per-ad rules screen');
+  await app.onUpdate(cbUpdate('alr2:tgl:96:1k:on'));
+  assert.ok(calls.find(c => c.type === 'db' && /update ad_alerts_rules/.test(c.args[0])), 'rule persisted');
+  await app.onUpdate(cbUpdate('alr2:global'));
+  assert.ok(calls.find(c => c.type === 'db' && /agency_settings/.test(c.args[0])), 'global toggle persisted');
+  /* engine: rules on, state zeros, live ad 96 → 1200v/20j/1.9TON → 3 notifications naming ad #96 */
+  const livealerts = require('../src/handlers/livealerts');
+  reset();
+  const sent = await livealerts.engine(() => {});
+  const sms = calls.filter(c => c.type === 'sm').map(c => String(c.args[1]));
+  assert.ok(sent >= 3, `engine sent ${sent} notifications`);
+  assert.ok(sms.some(t => /Ad #96/.test(t) && /1,000 views/.test(t)), '1k-view milestone names ad #96');
+  assert.ok(sms.some(t => /Ad #96/.test(t) && /join/i.test(t)), 'join notification names ad #96');
+  assert.ok(sms.some(t => /Ad #96/.test(t) && /TON/.test(t)), 'spend notification names ad #96');
+});
+
+test('E2E v7: single-ad report (#6/#55) + compare flow (#4)', async () => {
+  reset();
+  await app.onUpdate(cbUpdate('ad:96:rep'));
+  const doc = lastOf('sendDoc');
+  assert.ok(doc, 'single-ad report doc sent');
+  assert.ok(/ad-96-report-.*\.md/.test(String(doc.args[1])), '.md filename');
+  const md = String(doc.args[2]);
+  assert.ok(md.includes('AD REPORT — #96'), 'single-ad header');
+  assert.ok(md.includes('Verdict'), 'verdict included');
+  assert.ok(md.includes('WINNER'), 'ad 96 is winner-grade');
+  assert.ok(!md.includes('FLEET SUMMARY'), 'NOT a full-account report');
+  reset();
+  await app.onUpdate(cbUpdate('ad:96:cmp'));
+  assert.ok(/#96 vs\?/.test(String(lastOf('edit').args[2])), 'compare picker');
+  await app.onUpdate(cbUpdate('ad:96:cmp:79'));
+  const cmp = String(lastOf('edit').args[2]);
+  assert.ok(/COMPARE — #96 vs #79/.test(cmp), 'comparison screen');
+  assert.ok(/Cost\/join/.test(cmp) && /🏆/.test(cmp), 'metrics + winner callout');
+});
+
+test('E2E v7: packages — lang toggle, plans library, pricing editor', async () => {
+  stubTmeFetch();
+  try {
+    reset();
+    await app.onUpdate(cbUpdate('menu:pkg'));
+    await app.onUpdate(msgUpdate('t.me/demotraders'));
+    assert.ok(lastOf('sendDoc'), 'plan delivered first');
+    reset();
+    await app.onUpdate(cbUpdate('pkg:lang:hi'));
+    const doc = lastOf('sendDoc');
+    assert.ok(doc && /ग्रोथ प्लान/.test(String(doc.args[2])), 'HI plan regenerated without re-scan');
+    assert.ok(calls.find(c => c.type === 'db' && /insert into plans_archive/.test(c.args[0])), 'plan archived');
+    reset();
+    await app.onUpdate(cbUpdate('pkg:lib'));
+    assert.ok(/PLANS LIBRARY/.test(String(lastOf('edit').args[2])), 'library lists plans');
+    await app.onUpdate(cbUpdate('pkg:arch:1'));
+    assert.ok(lastOf('sendDoc'), 'archived plan re-downloaded');
+    reset();
+    await app.onUpdate(cbUpdate('pkg:price'));
+    assert.ok(/PRICING EDITOR/.test(String(lastOf('edit').args[2])), 'pricing editor screen');
+    await app.onUpdate(cbUpdate('pkg:price:1'));
+    assert.ok(/Send new value/.test(String(lastOf('edit').args[2])), 'price input step');
+    reset();
+    await app.onUpdate(msgUpdate('$200–400'));
+    assert.ok(calls.find(c => c.type === 'db' && /agency_settings/.test(c.args[0])), 'price persisted to settings');
+    assert.ok(/Pricing updated/.test(String(calls.filter(c => c.type === 'sm').slice(-1)[0].args[1])), 'confirmed');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('E2E v7: test-funnel draft import (#18) + /q + tour + catalog search (#22-24)', async () => {
+  stubTmeFetch();
+  try {
+    reset();
+    await app.onUpdate(cbUpdate('menu:testad'));
+    await app.onUpdate(cbUpdate('ta:imp'));
+    assert.ok(/IMPORT DRAFT/.test(String(lastOf('edit').args[2])), 'draft import list');
+    await app.onUpdate(cbUpdate('ta:impid:abc-uuid'));
+    assert.ok(lastOf('sendDoc'), 'research attached for imported draft');
+    assert.ok(/BUDGET/i.test(String(lastOf('edit').args[2])), 'jumps straight to budget (brief+link imported)');
+    await app.onUpdate(cbUpdate('ta:bud:1.8'));
+    const prev = lastOf('edit');
+    assert.ok(/Suggested split/.test(String(prev.args[2])), 'budget split advisor shown');
+    await app.onUpdate(cbUpdate('ta:go'));
+    assert.ok(/GO LIVE/.test(((lastOf('edit').args[3]) || {}).inline_keyboard?.flat().map(b => b.text).join(',') || ''), 'preview GO LIVE present');
+    /* cleanup funnel so later tests unaffected */
+    await app.onUpdate(cbUpdate('ta:cancel'));
+    reset();
+    await app.onUpdate(cbUpdate('menu:ads'));
+    await app.onUpdate(msgUpdate('/q'));
+    const q = calls.filter(c => c.type === 'sm').slice(-1)[0];
+    assert.ok(/QUICK ACTIONS/.test(String(q.args[1])), '/q shows recent');
+    assert.ok(q.args[2].inline_keyboard.flat().some(b => b.callback_data === 'menu:ads'), '/q includes last action shortcut');
+    reset();
+    await app.onUpdate(msgUpdate('/tour'));
+    assert.ok(/TOUR 1\/6/.test(String(calls.filter(c => c.type === 'sm').slice(-1)[0].args[1])), 'tour starts');
+    await app.onUpdate(cbUpdate('tour:1'));
+    assert.ok(/TOUR 2\/6/.test(String(lastOf('edit').args[2])), 'tour paginates');
+    reset();
+    await app.onUpdate(cbUpdate('feat:p:0'));
+    await app.onUpdate(cbUpdate('feat:search'));
+    await app.onUpdate(msgUpdate('pause'));
+    const hits = lastOf('sm') || lastOf('edit');
+    const hText = String(hits.args[1] ?? hits.args[2]);
+    const hKb = hits.args[2] || hits.args[3];
+    assert.ok(/features.*for|Kuch nahi mila/.test(hText), 'search runs');
+    assert.ok((hKb.inline_keyboard || { flat: () => [] }).flat().some(b => /Pause/.test(b.text)), 'search finds Pause features');
+  } finally { globalThis.fetch = realFetch; }
 });

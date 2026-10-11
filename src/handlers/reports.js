@@ -7,6 +7,7 @@
 
 const adsapi = require('../adsapi');
 const db = require('../db');
+const guard = require('../guard');
 const fmt = require('../format');
 
 /* verdict + recommended action per ad (fleet rules: push winners, 3 TON/day cap) */
@@ -131,4 +132,31 @@ async function exportCsv(ctx, periodDays) {
   return ctx.sendDoc(`thetas-ads-${periodDays}d.csv`, fmt.toCsv(rows), `📄 CSV — ${rows.length} ads.`);
 }
 
-module.exports = { report, exportCsv, buildReportMd, verdict, perAdMd };
+/* #6/#55: SINGLE-AD report — ek hi ad ka share-ready .md (full account report nahi) */
+async function singleAd(ctx, id) {
+  const [a] = await adsapi.getAdsById([id]);
+  if (!a) return ctx.editOrSend(`❌ #${id} not found.`, fmt.kb([[{ t: '⬅️ Ads', c: 'menu:ads' }]]));
+  const jr = a.clicks ? (a.joins || 0) / a.clicks : null;
+  const [emo, label] = verdict(a, jr);
+  const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const md = [
+    `# 📄 AD REPORT — #${a.ad_id}`,
+    '',
+    `**TelesAds · ${date}** · single-campaign report (not the full account) · source: official Telegram Ads API`,
+    '',
+    `**${emo} Verdict: ${label}**`,
+    '',
+    perAdMd(a),
+    '',
+    a.title ? `**Title:** ${a.title}\n` : '',
+    a.promote_url ? `**Promotes:** ${a.promote_url}\n` : '',
+    a.target ? `**Targeting:** \`${typeof a.target === 'string' ? a.target : JSON.stringify(a.target)}\`` : '',
+    '',
+    `**— THETAS AI · Fully Built By Agency @TelesAds (Telesads.com)**`,
+    `<sub>Generated ${new Date().toISOString()} · ₹ conversions are labeled estimates.</sub>`
+  ].filter(Boolean).join('\n');
+  await guard.audit(ctx.from.id, 'report.single', { id }, 'ok');
+  return ctx.sendDoc(`ad-${id}-report-${new Date().toISOString().slice(0, 10)}.md`, md, `📄 <b>Single-ad report — #${id}</b> ${emo} ${label}\n<i>Client ko seedha forward karo.</i>`);
+}
+
+module.exports = { report, exportCsv, buildReportMd, verdict, perAdMd, singleAd };

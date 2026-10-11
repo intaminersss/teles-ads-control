@@ -21,6 +21,14 @@ function sortAds(ads, sort) {
   return c;
 }
 
+/* #3: today's spend from snapshot deltas (min→max per ad today) */
+async function todaySpend() {
+  try {
+    const r = await db.q(`select coalesce(sum(mx - mn),0) t from (select ad_id, max((data->>'spent_budget')::numeric) mx, min((data->>'spent_budget')::numeric) mn from ads_snapshot where captured_at >= date_trunc('day', now()) group by ad_id) x`);
+    return Number(r?.[0]?.t || 0);
+  } catch { return null; }
+}
+
 async function adsMenu(ctx, page = 0, sort = 'live') {
   const acct = await adsapi.getCurrentAccount();
   const raw = await adsapi.getAdsList();
@@ -29,9 +37,11 @@ async function adsMenu(ctx, page = 0, sort = 'live') {
   const pages = Math.max(1, Math.ceil(ads.length / PAGE));
   page = Math.min(page, pages - 1);
   const slice = ads.slice(page * PAGE, page * PAGE + PAGE);
+  const today = await todaySpend();
+  const pacing = today != null ? `\n⏱️ <b>Today:</b> ${today.toFixed(2)} TON ${fmt.bar(today, 3)} <i>of 3 TON fleet cap</i>` : '';
   const bal = acct?.remaining_budget != null
     ? `${fmt.header('📊', 'LIVE ADS')}
-💰 <code>${fmt.bar(acct.remaining_budget, Math.max(acct.remaining_budget, 20))}</code> balance <b>${fmt.ton(acct.remaining_budget)}</b> · <i>${fmt.esc(adsapi.accountLabel())}</i>
+💰 <code>${fmt.bar(acct.remaining_budget, Math.max(acct.remaining_budget, 20))}</code> balance <b>${fmt.ton(acct.remaining_budget)}</b> · <i>${fmt.esc(adsapi.accountLabel())}</i>${pacing}
 
 ` : '';
   const kbRows = slice.map(a => [{ t: `#${a.ad_id} ${fmt.pill(a.status)}`, c: `ad:${a.ad_id}` }]);
@@ -135,8 +145,17 @@ async function adDetail(ctx, id) {
   const kbRows = [];
   if (a.status === 'active') kbRows.push([{ t: '⏸️ Pause', c: `ad:${id}:pause` }, { t: '🗑️ Delete', c: `ad:${id}:delc` }]);
   if (a.status === 'on_hold' || a.status === 'paused') kbRows.push([{ t: '▶️ Resume', c: `ad:${id}:resume` }]);
+  /* #5: creative age from snapshot first-seen */
+  try {
+    const f = await db.q(`select min(captured_at) f from ads_snapshot where ad_id=$1`, [id]);
+    if (f?.[0]?.f) {
+      const age = Math.floor((Date.now() - new Date(f[0].f).getTime()) / 86400e3);
+      if (age >= 10) var _ageBadge = `\n⏳ <b>Creative age ${age}d</b> — is niche me burnout fast: refresh soon`;
+    }
+  } catch {}
   kbRows.push([{ t: '⚙️ Daily cap +1', c: `ad:${id}:capup` }]);
-  kbRows.push([{ t: '🧬 Clone → draft', c: `ad:${id}:clone` }, { t: '🔥 Winners', c: 'ads:winners' }]);
+  kbRows.push([{ t: '🧬 Clone → draft', c: `ad:${id}:clone` }, { t: '⚖️ Compare', c: `ad:${id}:cmp` }]);
+  kbRows.push([{ t: '📄 Single-ad report', c: `ad:${id}:rep`, style: 'primary' }, { t: '🔥 Winners', c: 'ads:winners' }]);
   kbRows.push([{ t: '⬅️ Ads', c: 'menu:ads' }]);
   const text = [
     `${fmt.statusLabel(a.status)} <b>AD #${a.ad_id}</b>`,
@@ -145,7 +164,7 @@ async function adDetail(ctx, id) {
     `💸 spent ${(+a.spent_budget).toFixed(2)} TON (~${fmt.money(+a.spent_budget || 0)})`,
     a.daily_budget_limit ? `📅 daily cap ${a.daily_budget_limit} TON` : '',
     a.remaining_budget != null ? `💼 remaining ${(+a.remaining_budget).toFixed(2)} TON` : '',
-    a.text ? `\n📝 <i>${fmt.esc(String(a.text).slice(0, 200))}</i>` : '', t
+    a.text ? `\n📝 <i>${fmt.esc(String(a.text).slice(0, 200))}</i>` : '', t, typeof _ageBadge === 'string' ? _ageBadge : ''
   ].filter(Boolean).join('\n');
   await ctx.editOrSend(text, fmt.kb(kbRows));
 }
@@ -192,4 +211,43 @@ async function adAction(ctx, id, action) {
   }
 }
 
-module.exports = { adsMenu, adDetail, adAction, winners, bulk, cloneAd, cycleSort };
+/* #4: side-by-side comparison of two ads */
+async function compare(ctx, idA, idB) {
+  if (!idB) {
+    const list = (await adsapi.getAdsList()) || [];
+    const rows = list.filter(a => a.ad_id !== idA).slice(0, 8).map(a => [{ t: `vs #${a.ad_id}`, c: `ad:${idA}:cmp:${a.ad_id}` }]);
+    return ctx.editOrSend(`⚖️ <b>COMPARE — Ad #${idA} vs?</b>`, fmt.kb([...rows, [{ t: '⬅️ Ads', c: 'menu:ads' }]]));
+  }
+  const [a] = await adsapi.getAdsById([idA]);
+  const [b] = await adsapi.getAdsById([idB]);
+  if (!a || !b) return ctx.editOrSend('❌ Ad not found.', fmt.kb([[{ t: '⬅️ Ads', c: 'menu:ads' }]]));
+  const row = (x, y, label, fx = v => String(v), better) => {
+    const xa = fx(x), yb = fx(y);
+    let m = '  ';
+    if (better === 'hi' && x > y) m = '🅰️'; if (better === 'hi' && y > x) m = '🅱️';
+    if (better === 'lo' && x < y && y > 0) m = '🅰️'; if (better === 'lo' && y < x && x > 0) m = '🅱️';
+    return `| ${label} | ${xa} | ${yb} | ${m} |`;
+  };
+  const jr = x => (x.clicks ? (100 * (x.joins || 0) / x.clicks).toFixed(1) + '%' : '—');
+  const cpj = x => (x.joins ? ((x.spent_budget || 0) / x.joins).toFixed(3) + ' TON' : '—');
+  const winner = (() => {
+    const ja = a.clicks ? (a.joins || 0) / a.clicks : 0, jb = b.clicks ? (b.joins || 0) / b.clicks : 0;
+    return ja === jb ? '🤝 Tie' : ja > jb ? `🏆 <b>#${a.ad_id} (higher JR)</b>` : `🏆 <b>#${b.ad_id} (higher JR)</b>`;
+  })();
+  return ctx.editOrSend([
+    fmt.header('⚖️', `COMPARE — #${idA} vs #${idB}`),
+    '',
+    `| Metric | #${idA} | #${idB} | |`,
+    `|---|---|---|---|`,
+    row(a.views || 0, b.views || 0, 'Views', v => v.toLocaleString('en-US'), 'hi'),
+    row(a.clicks || 0, b.clicks || 0, 'Clicks', v => v.toLocaleString('en-US'), 'hi'),
+    row(a.joins || 0, b.joins || 0, 'Joins', v => v.toLocaleString('en-US'), 'hi'),
+    row(jr(a), jr(b), 'JR', s => s, 'hi'),
+    row(cpj(a), cpj(b), 'Cost/join', s => s, 'lo'),
+    row(+(a.spent_budget || 0), +(b.spent_budget || 0), 'Spent TON', v => v.toFixed(2), 'lo'),
+    '',
+    winner
+  ].join('\n'), fmt.kb([[{ t: `📄 #${idA} report`, c: `ad:${idA}:rep` }, { t: `📄 #${idB} report`, c: `ad:${idB}:rep` }], [{ t: '⬅️ Ads', c: 'menu:ads' }]]));
+}
+
+module.exports = { adsMenu, adDetail, adAction, winners, bulk, cloneAd, cycleSort, compare, todaySpend };

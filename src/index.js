@@ -15,11 +15,24 @@ const reports = require('./handlers/reports');
 const alerts = require('./handlers/alerts');
 const packages = require('./handlers/packages');
 const account = require('./handlers/account');
+const livealerts = require('./handlers/livealerts');
 const testad = require('./handlers/testad');
 const admin = require('./handlers/admin');
 const scheduler = require('./scheduler');
 
 const { log } = require('./log');
+
+/* v7: quick actions ring buffer (/q) + feature-catalog search state */
+const recentActions = [];
+const recordAction = (d) => {
+  if (!d || d === 'noop' || d.startsWith('feat:')) return;
+  const label = d.replace(/[:_]/g, ' ').replace(/\b(menu)\b/gi, '').trim().slice(0, 18) || d;
+  const i = recentActions.findIndex(r => r.d === d);
+  if (i >= 0) recentActions.splice(i, 1);
+  recentActions.unshift({ d, label });
+  if (recentActions.length > 4) recentActions.pop();
+};
+const featSearch = new Map(); // chatId → ts
 const logLine = m => log.info(m);
 
 /* ctx — wraps message/callback context for handlers */
@@ -61,10 +74,21 @@ async function routeMenu(ctx, sub) {
 async function routeCb(ctx) {
   const d = ctx.data;
   if (ctx.data && ctx.data !== 'noop') ctx.answerCb().catch(() => {}); // every tap acknowledged
+  recordAction(ctx.data);
   if (d.startsWith('menu:')) return routeMenu(ctx, d.slice(5));
   if (d.startsWith('ads:p')) return wrap(ctx, () => ads.adsMenu(ctx, Number(d.slice(5)) || 0));
   if (d.startsWith('ads:refresh')) return wrap(ctx, () => ads.adsMenu(ctx));
-  if (d.startsWith('ad:')) { const [, id, act] = d.split(':'); return act ? wrap(ctx, () => ads.adAction(ctx, Number(id), act)) : wrap(ctx, () => ads.adDetail(ctx, Number(id))); }
+  if (d.startsWith('ad:')) {
+    const rest = d.slice(3); const p1 = rest.indexOf(':');
+    const id = Number(p1 === -1 ? rest : rest.slice(0, p1));
+    if (p1 === -1) return wrap(ctx, () => ads.adDetail(ctx, id));
+    const rest2 = rest.slice(p1 + 1); const p2 = rest2.indexOf(':');
+    const act = p2 === -1 ? rest2 : rest2.slice(0, p2);
+    const arg = p2 === -1 ? null : rest2.slice(p2 + 1);
+    if (act === 'rep') return wrap(ctx, () => reports.singleAd(ctx, id));
+    if (act === 'cmp') return wrap(ctx, () => ads.compare(ctx, id, arg ? Number(arg) : null));
+    return wrap(ctx, () => ads.adAction(ctx, id, act));
+  }
   if (d.startsWith('res:q:')) return wrap(ctx, () => research.runSearch(ctx, d.slice(6)));
   if (d.startsWith('res:page:')) { const [, , q, p] = d.split(':'); return wrap(ctx, () => research.searchPage(ctx, q, Math.max(0, Number(p) || 0))); }
   if (d.startsWith('res:chk:')) return wrap(ctx, () => research.checkChannel(ctx, d.slice(8)));
@@ -95,16 +119,28 @@ async function routeCb(ctx) {
     return wrap(ctx, () => account.onCb(ctx, act, arg));
   }
   if (d.startsWith('sec:')) return wrap(ctx, () => sectionScreen(ctx, d.slice(4)));
+  if (d.startsWith('tour:')) return wrap(ctx, () => tourScreen(ctx, Number(d.slice(5)) || 0));
   if (d.startsWith('feat:')) {
     const [, a, b] = d.split(':');
     if (a === 'p') return wrap(ctx, () => catalogScreen(ctx, Number(b) || 0));
+    if (a === 'search') {
+      featSearch.set(ctx.chatId, Date.now());
+      return ctx.editOrSend('🔎 <b>Feature search</b> — keyword bhejo (jaise <code>pause</code>, <code>plan</code>, <code>join</code>):', fmt.kb([[{ t: '📜 Full catalog', c: 'feat:p:0' }], [{ t: '⬅️ Desk', c: 'menu:main' }]]));
+    }
     return wrap(ctx, () => featureScreen(ctx, Number(a)));
   }
   if (d === 'alr:digest') return wrap(ctx, () => alerts.toggleDigest(ctx));
   if (d === 'alr:bal5') return wrap(ctx, () => alerts.setBalanceAlert(ctx, 5));
   if (d === 'alr:bal10') return wrap(ctx, () => alerts.setBalanceAlert(ctx, 10));
   if (d === 'alr:baloff') return wrap(ctx, () => alerts.removeBalanceAlert(ctx));
-  if (d.startsWith('pkg:')) { const [, act] = d.split(':'); return wrap(ctx, () => packages.onCb(ctx, act)); }
+  if (d.startsWith('pkg:')) {
+    const rest = d.slice(4); const i = rest.indexOf(':');
+    return wrap(ctx, () => packages.onCb(ctx, i === -1 ? rest : rest.slice(0, i), i === -1 ? null : rest.slice(i + 1)));
+  }
+  if (d.startsWith('alr2:')) {
+    const p = d.split(':'); // alr2:act[:a[:b[:c]]]
+    return wrap(ctx, () => livealerts.onCb(ctx, p[1], p[2], p[3], p[4]));
+  }
   if (d.startsWith('ta:')) { const [, act, arg] = d.split(':'); return wrap(ctx, () => testad.onCb(ctx, act, arg)); }
   return ctx.answerCb();
 }
@@ -181,6 +217,7 @@ async function onUpdate(u) {
     if (testad.sessions.get(ctx.chatId)) { testad.sessions.kill(ctx.chatId); closed.push('🧪 Test-Ad funnel'); }
     if (packages.sessions.has(ctx.chatId)) { packages.sessions.delete(ctx.chatId); closed.push('📦 Packages'); }
     if (account.sessions.get(ctx.chatId)) { account.sessions.kill(ctx.chatId); closed.push('🏦 Add-account'); }
+    if (featSearch.has(ctx.chatId)) { featSearch.delete(ctx.chatId); closed.push('🔎 Feature-search'); }
     if (copy.resetState(ctx.chatId)) closed.push('✍️ Copy Studio');
     return ctx.sm(closed.length
       ? `${fmt.header('✅', 'CANCELLED')}\nClosed: <b>${closed.join(' · ')}</b>\n<i>Nothing was launched, nothing was spent.</i>`
@@ -190,7 +227,28 @@ async function onUpdate(u) {
   if (text.startsWith('/audit')) return wrap(ctx, () => admin.auditTail(ctx));
   if (text.startsWith('/ads')) return wrap(ctx, () => ads.adsMenu(ctx));
 
+  /* v7: feature-catalog search intake (before copy-wizard so stale sessions can't swallow it) */
+  if (featSearch.has(ctx.chatId)) {
+    if (Date.now() - featSearch.get(ctx.chatId) < 10 * 60e3 && !text.startsWith('/')) {
+      featSearch.delete(ctx.chatId);
+      const q = text.toLowerCase().slice(0, 30);
+      const hits = fmt.CATALOG.map((f, idx) => ({ f, idx })).filter(({ f }) => (f.n + ' ' + f.d).toLowerCase().includes(q)).slice(0, 10);
+      return ctx.editOrSend(hits.length
+        ? `🔎 <b>${hits.length} features</b> for "<code>${fmt.esc(q)}</code>":`
+        : `🔎 Kuch nahi mila "<code>${fmt.esc(q)}</code>" — dusra keyword try karo.`,
+        fmt.kb([...hits.map(({ f, idx }) => [{ t: `${f.i}  ${f.n}`, c: `feat:${idx}` }]),
+          [{ t: '📜 Full catalog', c: 'feat:p:0' }], [{ t: '⬅️ Desk', c: 'menu:main' }]]));
+    }
+    featSearch.delete(ctx.chatId);
+  }
   if (await copy.onText(ctx, text)) return;
+  /* v7: /q quick actions */
+  if (text.startsWith('/q')) {
+    if (!recentActions.length) return ctx.sm('⚡ <b>Quick actions</b>: abhi koi history nahi — buttons use karo, phir /q last 4 dikhayega.');
+    return ctx.sm('⚡ <b>QUICK ACTIONS — last used</b>', fmt.kb([...recentActions.map(r => [{ t: `↪️ ${fmt.esc(r.label)}`, c: r.d }]), [{ t: '🏠 Desk', c: 'menu:main' }]]));
+  }
+  /* v7: onboarding tour */
+  if (text.startsWith('/tour')) return wrap(ctx, () => tourScreen(ctx, 0));
   if (await account.onText(ctx, text)) return;
   if (await testad.onText(ctx, text)) return;
   if (await packages.onText(ctx, text)) return;
@@ -213,6 +271,25 @@ healthSrv.unref(); // never hold the process/event loop open (tests exit clean)
 /* ---- boot (only when run directly; require() exports router for tests) ---- */
 process.telesStopped = stoppedGenerations; // runtime registry shared with copy handler
 
+/* ---- v7 onboarding tour (#23) ---- */
+const TOUR = [
+  ['📊', 'ADS MANAGER', 'My Ads = live board: balance, today-spend pacing, sort, winners, bulk pause. Har ad ka detail: funnel, cap +1, clone, compare, single-ad report.'],
+  ['🧪', 'TEST AD FUNNEL', '6 steps: kitne tests → country → brief → channel link → research plan + budget → preview → GO LIVE. Draft import bhi hai.'],
+  ['📦', 'PACKAGES', 'Channel link bhejo → client-ready GROWTH PLAN .md (audit, competitors, targets, pricing). Language toggle, library, pricing editor.'],
+  ['🏦', 'ACCOUNTS', 'Multiple ads accounts: add (LIVE-validated) → switch → sab operations usi account pe. All-balances ek screen.'],
+  ['🔔', 'LIVE ALERTS', 'Per-campaign: har 1k views / har join / har 0.5 TON spend — notification me clearly ad # likha aata hai. Sirf 1 ad ke liye bhi on kar sakte ho.'],
+  ['📜', 'ALL 50+ FEATURES', 'Desk ka last button — 67 features ka paged catalog + 🔎 search. Har feature ka detail + Open shortcut.']
+];
+async function tourScreen(ctx, n) {
+  const [i, t, d] = TOUR[n] || TOUR[0];
+  const last = n === TOUR.length - 1;
+  return ctx.editOrSend(
+    `${fmt.header(i, `TOUR ${n + 1}/${TOUR.length} — ${t}`)}\n\n${d}\n\n<i>${last ? 'Tour complete — desk khula hai! 🎉' : 'Aage badho →'}</i>`,
+    fmt.kb(last
+      ? [[{ t: '📊 Open My Ads', c: 'menu:ads', style: 'primary' }], [{ t: '📜 All features', c: 'feat:p:0' }, { t: '🏠 Desk', c: 'menu:main' }]]
+      : [[{ t: 'Next ▶️', c: `tour:${n + 1}`, style: 'primary' }], ...(n > 0 ? [[{ t: '◀️ Back', c: `tour:${n - 1}` }]] : []), [{ t: 'Skip — Desk', c: 'menu:main' }]]));
+}
+
 /* ---- v6 feature hub screens (data-driven from fmt.CATALOG) ---- */
 function sectionScreen(ctx, sid) {
   const meta = fmt.SECTION_META[sid];
@@ -232,7 +309,7 @@ function catalogScreen(ctx, page) {
     fmt.kb([
       ...items.map(f => [{ t: `${f.i}  ${f.n}`, c: `feat:${f.idx}` }]),
       [...(p > 0 ? [{ t: '◀️ Prev', c: `feat:p:${p - 1}` }] : []), ...(p < pages - 1 ? [{ t: 'Next ▶️', c: `feat:p:${p + 1}` }] : [])],
-      [{ t: '⬅️ Desk', c: 'menu:main' }]
+      [{ t: '🔎 Search features', c: 'feat:search' }, { t: '⬅️ Desk', c: 'menu:main' }]
     ]));
 }
 function featureScreen(ctx, idx) {

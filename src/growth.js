@@ -8,11 +8,16 @@
    Week-1 test $150–300 · 30-day scale $1,000–1,500 · KPI CPL ≤ $0.30–0.60.
    All numbers honest: scraped stats + fleet-calibrated benchmarks (cpm 0.6 TON, JR ~50%). */
 
-const PRICING = {
+const PRICING_DEFAULT = {
   test: { usd: '$150–300', label: 'Week-1 TEST package' },
   scale: { usd: '$1,000–1,500', label: '30-day SCALE package' },
   cpl: '$0.30–0.60', cplInr: '₹25–50 per join', cpmTon: '0.6 TON / 1000 views'
 };
+/* live pricing — owner-editable (#10): agency_settings overrides defaults */
+let PRICING = { ...PRICING_DEFAULT };
+function setPricing(patch) { PRICING = { ...PRICING, ...patch }; }
+function getPricing() { return PRICING; }
+async function loadPricing(db) { try { const rows = await db.q(`select key,value from agency_settings where key like 'price.%'`) || []; for (const r of rows) { const k = r.key.slice(6); if (PRICING_DEFAULT[k] !== undefined) PRICING = { ...PRICING, [k]: r.value }; } } catch {} return PRICING; }
 
 const PROVEN_CHANNELS = ['@forexsignals', '@goldsignals', '@XAUUSD', '@forexmarket', '@cryptosignals', '@fxsignals', '@wolftrading25', '@msbfxelite', '@Forex', '@Forex_Signals_Blue_Pips'];
 
@@ -297,4 +302,4 @@ function buildPlanMd(res) {
   return lines.join('\n');
 }
 
-module.exports = { PRICING, PROVEN_CHANNELS, parseChannelLink, parseCount, detectLang, detectNiche, parsePreviewHtml, fetchPreview, researchChannel, buildPlanMd };
+module.exports = { PRICING, setPricing, getPricing, loadPricing, PRICING_DEFAULT, PROVEN_CHANNELS, parseChannelLink, parseCount, detectLang, detectNiche, parsePreviewHtml, fetchPreview, researchChannel, buildPlanMd };

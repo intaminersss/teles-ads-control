@@ -1,9 +1,13 @@
 'use strict';
-/* scheduler.js — in-process interval scheduler: daily digest + balance alerts (idempotent by date key). */
+/* scheduler.js — in-process scheduler: digests, balance alerts, plan follow-ups,
+   creative-age alerts, live per-ad alerts engine (idempotent by date/state keys). */
 const db = require('./db');
 const tg = require('./tg');
 const adsapi = require('./adsapi');
 const fmt = require('./format');
+const livealerts = require('./handlers/livealerts');
+
+const OWNER = () => Number((process.env.ALLOWED_USER_IDS || '7049127887').split(',')[0]);
 
 let running = false;
 async function tick(log) {
@@ -42,6 +46,56 @@ async function tick(log) {
         await db.q(`update alerts set last_run_at=now() where id=$1`, [al.id]);
       } catch (e) { log(`balance alert error: ${e.message}`); }
     }
+
+    /* #21: morning digest @ 09:00 IST (03:30 UTC), once per day */
+    const istHour = new Date(Date.now() + 5.5 * 3600e3).getUTCHours();
+    if (istHour === 9 && nowUtc.getUTCMinutes() < 5) {
+      const key = `digest_morning_${today}`;
+      const done = (await db.q(`select value from agency_settings where key=$1`, [key]))?.[0]?.value;
+      if (!done) {
+        try {
+          const acct = await adsapi.getCurrentAccount().catch(() => null);
+          const ads = (await adsapi.getAdsList().catch(() => [])) || [];
+          const active = ads.filter(a => a.status === 'active').length;
+          const joins = ads.reduce((x, a) => x + (a.joins || 0), 0);
+          const spent = ads.reduce((x, a) => x + (a.spent_budget || 0), 0);
+          await tg.sm(OWNER(), [
+            `☀️ <b>GOOD MORNING — ${today}</b>`,
+            `💰 Balance: <b>${acct?.remaining_budget ?? '?'} TON</b>`,
+            `📊 ${active}/${ads.length} ads active · 🚪 ${joins} joins lifetime · 💸 ${spent.toFixed(2)} TON spent`,
+            `<i>Board kholo: 📊 My Ads. Naye tests: 🧪 Test Ad.</i>`
+          ].join('\n'));
+          await db.q(`insert into agency_settings(key,value) values ($1,'1') on conflict (key) do update set value='1'`, [key]);
+        } catch (e) { log(`morning digest: ${e.message}`); }
+      }
+    }
+    /* #14: plan follow-up reminders (7 days after a plan was sent) */
+    try {
+      const due = (await db.q(`select id,username from plans_archive where followup_at is null or (followup_at <= now() and not followup_sent) limit 3`)) || [];
+      for (const pl of due) {
+        await tg.sm(OWNER(), `📬 <b>Plan follow-up:</b> @${pl.username} ko plan ~7 din pehle bheja tha — client ka jawab le aao?`).catch(() => {});
+        await db.q(`update plans_archive set followup_sent=true where id=$1`, [pl.id]);
+      }
+    } catch (e) { log(`followups: ${e.message}`); }
+    /* #5: creative-age alerts (active ads older than 10 days, once per week) */
+    try {
+      const ads = (await adsapi.getAdsList().catch(() => [])) || [];
+      const actives = ads.filter(a => a.status === 'active');
+      for (const a of actives) {
+        const f = await db.q(`select min(captured_at) f from ads_snapshot where ad_id=$1`, [a.ad_id]);
+        const first = f?.[0]?.f;
+        if (!first) continue;
+        const age = Math.floor((Date.now() - new Date(first).getTime()) / 86400e3);
+        if (age < 10) continue;
+        const key = `age_alert_${a.ad_id}`;
+        const last = (await db.q(`select value from agency_settings where key=$1`, [key]))?.[0]?.value;
+        if (last && Date.now() - Number(last) < 7 * 86400e3) continue;
+        await tg.sm(OWNER(), `⏳ <b>Creative age ${age}d</b> — Ad #${a.ad_id} abhi bhi active. Refresh ya clone karo (niche burnout fast hai).`).catch(() => {});
+        await db.q(`insert into agency_settings(key,value) values ($1,$2) on conflict (key) do update set value=$2`, [key, String(Date.now())]);
+      }
+    } catch (e) { log(`age alerts: ${e.message}`); }
+    /* #56: live per-ad alerts engine (1k views / joins / spend) */
+    try { await livealerts.engine(log); } catch (e) { log(`live alerts: ${e.message}`); }
   } finally { running = false; }
 }
 

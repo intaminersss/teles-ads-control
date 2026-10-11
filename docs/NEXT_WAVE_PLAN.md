@@ -1,7 +1,7 @@
 # 🗺️ THETAS AI — NEXT WAVE PLAN: 54 NEW FEATURES (v7)
 
 **THETAS AI — Fully Built By Agency @TelesAds (Telesads.com)**
-Status: **PLAN ONLY — kuch bhi build nahi hoga jab tak tum approve nahi karte.**
+Status: **APPROVED by owner (all P0+P1 + 2 additions #55/#56) — Wave A SHIPPED 12 Oct.** P2 designs: docs/P2_DESIGNS.md
 Already LIVE: 67 features (docs/FEATURES.md) — ye plan uske **aage** ki wave hai.
 Approve kaise kare: **"All approve"** likho, ya numbers batao (e.g. "1,2,5-12,20-30"). Decisions wale items ke liye pehle jawab do.
 
@@ -130,6 +130,12 @@ Approve kaise kare: **"All approve"** likho, ya numbers batao (e.g. "1,2,5-12,20
 **Wave C:** #25–48 (P1 remaining)
 **P2:** tumhare decisions ke baad
 
-**Total: 54 features · 28 quick (S) · 20 medium (M) · 6 big/decision (L)**
+**Total: 56 features (54 + #55 single-ad report [already #6] + #56 LIVE notification system)**
+
+## ✅ SHIPPED IN WAVE A (12 Oct, v7 — 60/60 tests)
+#3 pacing meter · #4 ad compare · #5 creative-age alerts · #6 single-ad report (#55) · #8 plan lang toggle ·
+#10 pricing editor · #13 plans library · #14 follow-up reminders · #18 draft import · #19 budget split ·
+#21 morning digest 9am IST · #22 /q quick actions · #23 tour · #24 catalog search ·
+**#56 LIVE notifications (per 1k views / joins / 0.5 TON spend, per-ad rules + global toggle)**
 
 — THETAS AI · plan doc v1 · waiting for approval

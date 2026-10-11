@@ -12,6 +12,7 @@ const growth = require('../growth');
 const fmt = require('../format');
 const guard = require('../guard');
 const adsapi = require('../adsapi');
+const db = require('../db');
 const spyapi = require('../spyapi');
 const packages = require('./packages');
 const copy = require('./copy');
@@ -30,6 +31,7 @@ const kill = chatId => sessions.delete(chatId);
 
 const HOME_ROWS = () => [
   [{ t: '🧪 1 test', c: 'ta:n:1' }, { t: '🧪🧪 2 tests', c: 'ta:n:2', style: 'primary' }, { t: '3 tests', c: 'ta:n:3' }],
+  [{ t: '📥 Import from Drafts', c: 'ta:imp' }],
   [{ t: '📦 Packages', c: 'menu:pkg' }], [{ t: '⬅️ Menu', c: 'menu:main' }]
 ];
 
@@ -155,6 +157,7 @@ async function preview(ctx) {
     `🎯 <b>Targeting:</b> channels ${s.research.targetChannels.slice(0, 3).join(' ')}+${Math.max(s.research.targetChannels.length - 3, 0)} · geo ${g.cc.join('/')} · langs ${g.langs.join('/')}`,
     `📡 <b>Placement:</b> ${PLACEMENT} · CPM ${CPM} TON`,
     `💰 <b>Budget:</b> ${s.budget} TON · daily cap 3 TON`,
+    `💡 <i>Suggested split: ~${(s.budget / s.n).toFixed(2)} TON per test — level-load sabko, pehle read ke baad winner ko top-up (fleet rule).</i>`,
     '',
     `<b>${s.n} ad${s.n > 1 ? 's' : ''} will go LIVE on official Telegram Ads.</b>`
   ].join('\n'), fmt.kb([
@@ -243,6 +246,8 @@ async function onText(ctx, text) {
 /* callback routes ta:* */
 async function onCb(ctx, action, arg) {
   const s = get(ctx.chatId);
+  if (action === 'imp') return importList(ctx);
+  if (action === 'impid') return importDraft(ctx, String(arg));
   if (action === 'start' || action === 'frompkg') return start(ctx);
   if (action === 'fromres' && arg) { put(ctx.chatId, { link: `t.me/${arg}` }); return start(ctx, arg); }
   if (action === 'cancel') { kill(ctx.chatId); return ctx.editOrSend('🧪 Test funnel closed. Nothing was spent.', fmt.kb([[{ t: '🧪 Start again', c: 'ta:start' }], [{ t: '⬅️ Menu', c: 'menu:main' }]])); }
@@ -273,6 +278,31 @@ async function doBudgetStep(ctx) {
     [{ t: '✏️ Custom budget', c: 'ta:bud:custom' }],
     [{ t: '⬅️ Link', c: 'ta:back:link' }], [{ t: '❌ Cancel', c: 'ta:cancel' }]
   ]));
+}
+
+/* #18: import existing draft into the funnel (skips brief/link if usable) */
+async function importList(ctx) {
+  const rows = (await db.q(`select id,title,status from drafts where status='draft' order by updated_at desc limit 8`)) || [];
+  if (!rows.length) return ctx.editOrSend('📥 <b>No drafts found</b> — Copy Studio ya clone se drafts banao.', fmt.kb([[{ t: '📋 Drafts', c: 'menu:drafts' }], [{ t: '🧪 Start fresh', c: 'ta:start' }]]));
+  return ctx.editOrSend('📥 <b>IMPORT DRAFT → TEST FUNNEL</b>\nKaunsa draft?', fmt.kb([
+    ...rows.map(d => [{ t: `${String(d.title || d.id).slice(0, 24)}`, c: `ta:impid:${d.id}` }]),
+    [{ t: '🧪 Start fresh', c: 'ta:start' }], [{ t: '❌ Cancel', c: 'ta:cancel' }]]));
+}
+
+async function importDraft(ctx, id) {
+  const d = await db.one(`select * from drafts where id=$1`, [id]);
+  if (!d) return ctx.answerCb('Draft not found.');
+  copy.resetState(ctx.chatId); packages.clearOne(ctx.chatId);
+  const link = growth.parseChannelLink(d.promote_url || '');
+  put(ctx.chatId, {
+    state: link ? 'brief_done' : 'link',
+    n: 1, geo: 'in',
+    brief: String(d.text || '').slice(0, 600) || null,
+    link: link ? `t.me/${link}` : null, username: link || null,
+    research: null, budget: null, results: null
+  });
+  if (link) return doResearch(ctx);
+  return ctx.editOrSend('📥 Draft imported — brief ready.\n\n④ Ab <b>channel link</b> bhejo:', fmt.kb([[{ t: '❌ Cancel', c: 'ta:cancel' }]]));
 }
 
 module.exports = { start, onText, onCb, sessions: { get, put, kill } };
