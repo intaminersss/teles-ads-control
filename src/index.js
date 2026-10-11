@@ -146,7 +146,7 @@ async function onUpdate(u) {
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true, mode: config.BOT_MODE, uptime: process.uptime(), lastUpdateAt: tg.stats().lastUpdateAt }));
-}).listen(config.PORT, () => log(`health server on :${config.PORT}`));
+}).listen(config.PORT, () => logLine(`health server on :${config.PORT}`));
 
 /* ---- boot ---- */
 process.telesStopped = stoppedGenerations; // runtime registry shared with copy handler
