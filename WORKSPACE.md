@@ -31,3 +31,10 @@ Thetas Ai/
 - **Railway CLI works WITHOUT GitHub push:** `RAILWAY_API_TOKEN=<account token> npx @railway/cli up --detach` (project already linked via .railway). Note: env var must be `RAILWAY_API_TOKEN` (account token), NOT `RAILWAY_TOKEN`.
 - v4 shipped this way (deployment b24316de, SUCCESS, health verified).
 - GitHub push PENDING: PAT ghp_hhCX… revoked (401); ghp_u5zq… (noontrade69-sketch) has read-only. Need fresh PAT (repo scope, intaminersss) to sync main (v4 commit 4ba08e8 is local).
+
+## v5 (12 Oct 2026)
+- 📦 Packages + 🧪 Test Ad funnel + .md reports — src/growth.js (research engine), handlers/packages.js, handlers/testad.js
+- Agency pricing LOCKED in src/growth.js PRICING: test $150–300 · scale $1,000–1,500 · CPL ≤$0.30–0.60 (source: docs/GROWTH_PLAN_TEMPLATE.md)
+- Channel research = t.me/s public preview scrape + tgadsspy advertisers + proven fleet channels; language hi/ru/en/ar + niche 8 buckets auto-detect
+- Deploy: RAILWAY_API_TOKEN + `npx @railway/cli up --detach` (no GitHub needed). v5 dep 594bc98b SUCCESS.
+- GitHub repo still at v3 (token dead) — sync pending fresh PAT.
