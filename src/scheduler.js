@@ -96,6 +96,22 @@ async function tick(log) {
     } catch (e) { log(`age alerts: ${e.message}`); }
     /* #56: live per-ad alerts engine (1k views / joins / spend) */
     try { await livealerts.engine(log); } catch (e) { log(`live alerts: ${e.message}`); }
+    /* STATUS-CHANGE ALERTS: in_review -> active (etc.) — instant ping to owner */
+    try {
+      const ads = (await adsapi.getAdsList().catch(() => [])) || [];
+      const cur = Object.fromEntries(ads.map(a => [a.ad_id, a.status]));
+      const prevRaw = (await db.q(`select value from agency_settings where key='ad_statuses'`))?.[0]?.value;
+      const prev = prevRaw ? JSON.parse(prevRaw) : null;
+      if (prev) {
+        for (const [id, st] of Object.entries(cur)) {
+          if (prev[id] && prev[id] !== st) {
+            const emoji = st === 'active' ? '🟢' : st === 'in_review' ? '⏳' : st === 'paused' ? '💤' : 'ℹ️';
+            await tg.sm(OWNER(), `${emoji} <b>AD #${id}: ${prev[id]} → ${st.toUpperCase()}</b>${st === 'active' ? '\n🚀 TRAFFIC LIVE — board kholo: 📊 My Ads' : ''}`).catch(() => {});
+          }
+        }
+      }
+      await db.q(`insert into agency_settings(key,value) values ('ad_statuses',$1) on conflict (key) do update set value=$1`, [JSON.stringify(cur)]);
+    } catch (e) { log(`status alerts: ${e.message}`); }
   } finally { running = false; }
 }
 
