@@ -43,6 +43,9 @@ async function adsCall(method, { body = {}, idemKey, token } = {}) {
 }
 
 const ERR_HELP = {
+  COUNTRIES_TOO_MANY: 'Platform limit: max 5 countries per ad — split geo across multiple ads.',
+  LANGUAGE_AND_CHANNEL_NOT_ALLOWED: 'Channel-targeted ads cannot combine language_codes — drop languages for channel targeting.',
+  INITIAL_BUDGET_NOT_ALLOWED: 'Interest/users-topic targeting needs min 4 TON initial budget (channels type allows 1.8+).',
   AD_RESULT_BUDGET_TOO_SMALL: 'Minimum ad budget is 1.8 TON.',
   AD_IS_ACTIVE: 'Ad is active — pause it first, then retry (platform cooldown ~10 min).',
   CHANNEL_TOO_SMALL: 'Channel below Telegram Ads minimum size.',
